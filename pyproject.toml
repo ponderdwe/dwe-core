@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dwe-core"
+version = "1.0.0"
+description = "DWE CLI - Data Warehouse Ecosystem Orchestrator"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "typer[all]>=0.9.0",
+    "copier>=9.0.0",
+    "gitpython>=3.1.40",
+    "PyGithub>=2.1.1",
+    "python-gitlab>=4.4.0",
+    "jinja2>=3.1.2",
+    "rich>=13.7.0",
+]
+
+[project.scripts]
+dwe = "dwe.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["dwe"]

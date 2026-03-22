@@ -1,0 +1,7 @@
+{
+  "test_adapter": {
+    "path": "/Users/egortarasenko/Documents/Hipposys/Ponder/github/dwe_test_adapter",
+    "type": "local",
+    "description": "Test adapter: AWS EC2 instance via Pulumi"
+  }
+}
