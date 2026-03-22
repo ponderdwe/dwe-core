@@ -1,0 +1,42 @@
+name: TagWithPoetryVersion
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'pyproject.toml'
+
+jobs:
+  tag_version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        run: curl -sSL https://install.python-poetry.org | python3 -
+
+      - name: Get version from pyproject.toml
+        id: poetry_version
+        run: echo "version=$(poetry version --short)" >> $GITHUB_ENV
+
+      - name: Create Git tag if it doesn't exist
+        env:
+          version: ${{ env.version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git ls-remote --tags origin "v$version" | grep -q "v$version"; then
+            echo "Tag v$version already exists — skipping."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "v$version" -m "Version $version"
+            git push origin "v$version"
+            echo "Created and pushed tag v$version"
+          fi

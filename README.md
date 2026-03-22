@@ -28,7 +28,8 @@ The result is a client repo that already has working infrastructure code, a `jus
 ## Installation
 
 ```bash
-pip install -e .          # from dwe-core source
+pip install poetry        # if not already installed
+poetry install            # from dwe-core source (creates venv, installs deps)
 # or once published:
 pip install dwe-core
 ```
@@ -636,6 +637,60 @@ git add .github/workflows/deploy-staging.yaml
 git commit -m "chore: add staging environment"
 git push
 ```
+
+---
+
+## Releasing to PyPI
+
+Two workflows handle the full release lifecycle:
+
+```
+bump version in pyproject.toml → merge to main
+         │
+         ▼
+  tag-version.yml          triggers on: push to main, pyproject.toml changed
+  reads Poetry version      creates git tag vX.Y.Z automatically
+         │
+         ▼
+  (go to GitHub → Releases → Draft a new release → publish it)
+         │
+         ▼
+  pypi-publish.yml          triggers on: release published
+  poetry build + publish    pushes to PyPI via PYPI_TOKEN
+```
+
+### One-time setup
+
+Add `PYPI_TOKEN` to the repository secrets (`Settings → Secrets → Actions`):
+
+1. Go to **https://pypi.org/manage/account/token/** and create an API token scoped to `dwe-core`
+2. In GitHub: `Settings → Secrets and variables → Actions → New repository secret`
+   - Name: `PYPI_TOKEN`
+   - Value: the token from PyPI (starts with `pypi-`)
+
+### Release flow
+
+**Step 1 — bump the version and merge to `main`:**
+
+```bash
+poetry version patch        # 1.0.0 → 1.0.1
+poetry version minor        # 1.0.0 → 1.1.0
+poetry version major        # 1.0.0 → 2.0.0
+poetry version prerelease   # 1.0.0 → 1.0.1a1
+poetry version 1.2.0        # set explicit version
+
+git add pyproject.toml
+git commit -m "chore: bump version to $(poetry version -s)"
+git push origin main
+```
+
+`tag-version.yml` fires on the push, reads the version from `pyproject.toml`, and pushes tag `vX.Y.Z`. No manual tagging needed, and it only runs on `main`.
+
+**Step 2 — publish the GitHub Release:**
+
+Go to `github.com/<org>/dwe-core/releases`, click **Draft a new release**, select the tag just created, and click **Publish release**.
+
+`pypi-publish.yml` fires on the publish event: runs `poetry install`, `poetry build`, then `poetry publish -u __token__ -p $PYPI_TOKEN`.
 
 ---
 
