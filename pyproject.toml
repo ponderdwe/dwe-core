@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "dwe-core"
-version = "1.0.0a1"
+version = "0.1.0a1"
 description = "DWE CLI - Data Warehouse Ecosystem Orchestrator"
 readme = "README.md"
 packages = [{ include = "dwe" }]
