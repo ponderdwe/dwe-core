@@ -31,7 +31,7 @@ from dwe.git_ops import (
     parse_repo_info,
     push_branch,
 )
-from dwe.registry import get_adapter, list_adapters, load_registry
+from dwe.registry import get_adapter, get_adapter_catalog, list_adapters, load_registry
 from dwe.secrets import inject_secrets
 from dwe.state import read_state, update_state_version, write_state
 
@@ -296,27 +296,48 @@ def update_service(
 
 
 @app.command("list-adapters")
-def list_adapters_cmd():
-    """List all registered adapters."""
-    registry = load_registry()
-    if not registry:
+def list_adapters_cmd(
+    full: bool = typer.Option(False, "--full", help="Show required secrets for each adapter"),
+):
+    """List all registered adapters with metadata from their copier.yml."""
+    catalog = get_adapter_catalog()
+    if not catalog:
         console.print("[yellow]No adapters registered.[/yellow]")
         return
 
     table = Table(title="Registered Adapters")
     table.add_column("Name", style="cyan")
+    table.add_column("Display Name", style="bold")
     table.add_column("Type", style="green")
-    table.add_column("Path / URL")
+    table.add_column("Source")
     table.add_column("Description")
 
-    for name, info in registry.items():
+    for name, info in catalog.items():
+        source = info.get("url") or info.get("path") or "N/A"
         table.add_row(
             name,
-            info.get("type", "local"),
-            info.get("path", info.get("url", "N/A")),
+            info.get("display_name", name),
+            info.get("type", "git"),
+            source,
             info.get("description", ""),
         )
     console.print(table)
+
+    if full:
+        for name, info in catalog.items():
+            required = info.get("required_secrets", [])
+            optional = info.get("optional_secrets", [])
+            if not required and not optional:
+                continue
+            secrets_table = Table(title=f"[cyan]{name}[/cyan] secrets", show_header=True)
+            secrets_table.add_column("Key", style="bold")
+            secrets_table.add_column("Required")
+            secrets_table.add_column("Description")
+            for s in required:
+                secrets_table.add_row(s["key"], "[red]yes[/red]", s.get("description", ""))
+            for s in optional:
+                secrets_table.add_row(s["key"], "[dim]no[/dim]", s.get("description", ""))
+            console.print(secrets_table)
 
 
 if __name__ == "__main__":
