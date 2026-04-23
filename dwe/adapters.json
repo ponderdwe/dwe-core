@@ -1,0 +1,58 @@
+{
+  "dwe_cube": {
+    "url": "https://github.com/ponderedw/dwe_cube",
+    "type": "git",
+    "description": "Cube.js semantic layer + CubeStore + Milvus vector DB + RAG FastAPI",
+    "hub_name": "cube",
+    "display_name": "Cube.js Semantic Layer",
+    "icon": "boxes",
+    "git_providers": ["github", "gitlab"],
+    "cloud_providers": ["aws"],
+    "services": [
+      {"name": "CubeJS", "description": "Semantic layer \u2014 REST / GraphQL / WebSocket API over your data warehouse"},
+      {"name": "CubeStore", "description": "Pre-aggregation cache for sub-second query responses"},
+      {"name": "Milvus", "description": "Vector database for semantic / similarity search"},
+      {"name": "RAG FastAPI", "description": "Retrieval-augmented generation API backed by Milvus"},
+      {"name": "dbt-cube-sync", "description": "Syncs dbt models to Cube.js schema definitions automatically"},
+      {"name": "Application Load Balancer", "description": "HTTP -> HTTPS redirect + HTTPS termination. Configurable as internet-facing or internal (VPC-only) via ALB_INTERNAL secret"},
+      {"name": "DNS", "description": "Route53 CNAME record pointing to the ALB"},
+      {"name": "EC2 DNS", "description": "Route53 A record pointing directly to the EC2 instance IP — private IP for internal ALB, public IP for internet-facing"}
+    ],
+    "required_secrets": [
+      {"key": "AWS_ACCESS_KEY_ID", "description": "AWS access key \u2014 Pulumi uses this to provision infrastructure and SSM to redeploy the app", "destination": "ci"},
+      {"key": "AWS_SECRET_ACCESS_KEY", "description": "AWS secret key", "destination": "ci"},
+      {"key": "PULUMI_S3_STATE", "description": "S3 URL for Pulumi state backend, e.g. s3://my-pulumi-state-bucket", "destination": "ci"},
+      {"key": "ROUTE53_ZONE_ID", "description": "Route53 hosted zone ID (e.g. Z1D633PJN98FT9)", "destination": "secrets_manager"},
+      {"key": "DNS_NAME", "description": "Public DNS name for the Cube API (e.g. cube.myorg.com)", "destination": "secrets_manager"},
+      {"key": "ACM_CERTIFICATE_ARN", "description": "ACM certificate ARN for HTTPS on the ALB (must cover DNS_NAME)", "destination": "secrets_manager"},
+      {"key": "VPC_ID", "description": "AWS VPC ID where infrastructure is deployed", "destination": "secrets_manager"},
+      {"key": "ALB_SUBNET_IDS", "description": "JSON array of public subnet IDs for the ALB (e.g. [\"subnet-aaa\",\"subnet-bbb\"])", "destination": "secrets_manager"},
+      {"key": "KEY_NAME", "description": "EC2 key pair name for SSH access", "destination": "secrets_manager"},
+      {"key": "EC2_SECURITY_GROUP_ID", "description": "Additional EC2 security group ID to attach (e.g. existing SG with DB/SSM rules)", "destination": "secrets_manager"},
+      {"key": "LB_SECURITY_GROUP_ID", "description": "Security group ID to attach to the load balancer (e.g. internal SG restricting access)", "destination": "secrets_manager"},
+      {"key": "ALB_INTERNAL", "description": "Set to 'true' for internal ALB (VPC-only), 'false' for internet-facing. Default: false", "destination": "secrets_manager"},
+      {"key": "git_deploy_token", "description": "GitLab / GitHub token — EC2 uses this to clone the repo on first boot", "destination": "secrets_manager"},
+      {"key": "git_deploy_username", "description": "Username paired with git_deploy_token for HTTPS clone", "destination": "secrets_manager"},
+      {"key": "CUBEJS_DB_TYPE", "description": "Data warehouse driver (postgres | bigquery | snowflake | athena | redshift | trino \u2026)", "destination": "secrets_manager"},
+      {"key": "CUBEJS_DB_HOST", "description": "Data warehouse hostname", "destination": "secrets_manager"},
+      {"key": "CUBEJS_DB_PORT", "description": "Data warehouse port (e.g. 5432 for Postgres)", "destination": "secrets_manager"},
+      {"key": "CUBEJS_DB_NAME", "description": "Data warehouse database / catalog name", "destination": "secrets_manager"},
+      {"key": "CUBEJS_DB_USER", "description": "Data warehouse username", "destination": "secrets_manager"},
+      {"key": "CUBEJS_DB_PASS", "description": "Data warehouse password", "destination": "secrets_manager"},
+      {"key": "CUBEJS_API_SECRET", "description": "JWT signing secret for Cube.js API \u2014 generate with: openssl rand -hex 32", "destination": "secrets_manager"},
+      {"key": "SUPERSET_URL", "description": "Superset instance URL for dbt-cube-sync", "destination": "secrets_manager"},
+      {"key": "SUPERSET_USERNAME", "description": "Superset username used by dbt-cube-sync", "destination": "secrets_manager"},
+      {"key": "SUPERSET_PASSWORD", "description": "Superset password for the sync user", "destination": "secrets_manager"}
+    ],
+    "optional_secrets": [
+      {"key": "HOSTED_ZONE_ID_EC2_DNS", "description": "Route53 hosted zone ID for the EC2 DNS record (e.g. Z1MHSQZ1OR039Y)", "destination": "secrets_manager"},
+      {"key": "EC2_DNS", "description": "DNS name for the EC2 instance A record. Resolves to private IP (internal ALB) or public IP (internet-facing).", "destination": "secrets_manager"},
+      {"key": "OPENAI_API_KEY", "description": "OpenAI key for RAG embeddings", "destination": "secrets_manager"},
+      {"key": "DATABASE_URI", "description": "SQLAlchemy URI for dbt-cube-sync", "destination": "secrets_manager"},
+      {"key": "AWS_DEFAULT_REGION", "description": "AWS region (default: us-east-1)", "destination": "secrets_manager"},
+      {"key": "LLM_PROVIDER", "description": "LLM provider (openai | anthropic | bedrock | ollama)", "destination": "secrets_manager"},
+      {"key": "LLM_MODEL_ID", "description": "LLM model identifier", "destination": "secrets_manager"},
+      {"key": "LLM_API_KEY", "description": "LLM API key (if not using Bedrock)", "destination": "secrets_manager"}
+    ]
+  }
+}

@@ -32,7 +32,12 @@ from dwe.git_ops import (
     push_branch,
 )
 from dwe.registry import get_adapter, get_adapter_catalog, list_adapters, load_registry
-from dwe.secrets import inject_secrets
+from dwe.secrets import (
+    delete_secret,
+    inject_secrets,
+    list_secret_keys,
+    set_secrets,
+)
 from dwe.state import read_state, update_state_version, write_state
 
 app = typer.Typer(
@@ -64,13 +69,17 @@ def _generate_ci_workflows(
     platform: str,
     aws_region: str,
 ) -> None:
-    """Render ci-templates/deploy.yaml for each environment and write to repo."""
+    """Render ci-templates/{platform}.yaml for each environment and write to repo."""
     ci_templates_dir = Path(adapter_path) / "ci-templates"
-    if not ci_templates_dir.exists():
-        console.print("[yellow]No ci-templates/ found in adapter, skipping CI/CD generation[/yellow]")
+    template_file = f"{platform}.yaml"
+
+    if not ci_templates_dir.exists() or not (ci_templates_dir / template_file).exists():
+        console.print(
+            f"[yellow]No ci-templates/{template_file} found in adapter, skipping CI/CD generation[/yellow]"
+        )
         return
 
-    # Use {@ @} as variable delimiters so GitHub Actions ${{ }} syntax is
+    # Use {@ @} as variable delimiters so ${{ }} GitHub/GitLab syntax is
     # never interpreted by Jinja2 and passes through verbatim.
     jinja_env = Environment(
         loader=FileSystemLoader(str(ci_templates_dir)),
@@ -79,14 +88,13 @@ def _generate_ci_workflows(
         keep_trailing_newline=True,
     )
 
-    workflows_dir = (
-        Path(repo_path) / ".github" / "workflows"
-        if platform == "github"
-        else Path(repo_path) / ".gitlab"
-    )
+    if platform == "github":
+        workflows_dir = Path(repo_path) / ".github" / "workflows"
+    else:
+        workflows_dir = Path(repo_path) / ".gitlab" / "workflows"
     workflows_dir.mkdir(parents=True, exist_ok=True)
 
-    template = jinja_env.get_template("deploy.yaml")
+    template = jinja_env.get_template(template_file)
     for env_name in environments:
         rendered = template.render(ENV_NAME=env_name, AWS_REGION=aws_region)
         output = workflows_dir / f"deploy-{env_name}.yaml"
@@ -338,6 +346,231 @@ def list_adapters_cmd(
             for s in optional:
                 secrets_table.add_row(s["key"], "[dim]no[/dim]", s.get("description", ""))
             console.print(secrets_table)
+
+
+@app.command("set-secrets")
+def set_secrets_cmd(
+    git_repo: str = typer.Option(..., "--git-repo", help="Client repository URL"),
+    secrets: Optional[str] = typer.Option(
+        None, "--secrets", help='JSON string, e.g. \'{"AWS_KEY":"val"}\''
+    ),
+    secrets_file: Optional[str] = typer.Option(
+        None, "--secrets-file", help="Path to a JSON file with secrets"
+    ),
+    adapter_name: Optional[str] = typer.Option(
+        None, "--adapter", help="Validate against adapter required keys before pushing"
+    ),
+    token: Optional[str] = typer.Option(
+        None, "--token",
+        envvar=["GITHUB_TOKEN", "GITLAB_TOKEN"],
+        help="API token for secret injection",
+    ),
+):
+    """Create or update secrets / CI variables in a GitHub or GitLab repository."""
+    if not token:
+        console.print("[red]--token is required (or set GITHUB_TOKEN / GITLAB_TOKEN)[/red]")
+        raise typer.Exit(1)
+
+    if secrets_file:
+        import pathlib
+        raw = pathlib.Path(secrets_file).read_text()
+    elif secrets:
+        raw = secrets
+    else:
+        console.print("[red]Provide --secrets or --secrets-file[/red]")
+        raise typer.Exit(1)
+
+    try:
+        secrets_dict = json.loads(raw)
+    except json.JSONDecodeError as e:
+        console.print(f"[red]Invalid JSON:[/red] {e}")
+        raise typer.Exit(1)
+
+    # Optional: validate required keys before pushing
+    if adapter_name:
+        catalog = get_adapter_catalog()
+        info = catalog.get(adapter_name, {})
+        required = [s["key"] for s in info.get("required_secrets", [])]
+        missing = [k for k in required if k not in secrets_dict]
+        if missing:
+            console.print(f"[yellow]Warning — missing required keys:[/yellow] {', '.join(missing)}")
+
+    owner, repo_name = parse_repo_info(git_repo)
+    platform = "gitlab" if "gitlab" in git_repo.lower() else "github"
+    console.print(
+        f"\nPushing [bold]{len(secrets_dict)}[/bold] secret(s) to "
+        f"[cyan]{owner}/{repo_name}[/cyan] ({platform})\n"
+    )
+    results = set_secrets(git_repo, owner, repo_name, secrets_dict, token)
+    ok = sum(1 for v in results.values() if v)
+    console.print(f"\n[bold]{ok}/{len(results)}[/bold] secret(s) pushed successfully.")
+
+
+@app.command("list-secrets")
+def list_secrets_cmd(
+    git_repo: str = typer.Option(..., "--git-repo", help="Client repository URL"),
+    adapter_name: Optional[str] = typer.Option(
+        None, "--adapter", help="Cross-reference keys against adapter requirements"
+    ),
+    token: Optional[str] = typer.Option(
+        None, "--token",
+        envvar=["GITHUB_TOKEN", "GITLAB_TOKEN"],
+    ),
+):
+    """List secret key names in a repository (values are never revealed)."""
+    if not token:
+        console.print("[red]--token is required (or set GITHUB_TOKEN / GITLAB_TOKEN)[/red]")
+        raise typer.Exit(1)
+
+    owner, repo_name = parse_repo_info(git_repo)
+    existing = set(list_secret_keys(git_repo, owner, repo_name, token))
+
+    required: list[str] = []
+    optional: list[str] = []
+    if adapter_name:
+        catalog = get_adapter_catalog()
+        info = catalog.get(adapter_name, {})
+        required = [s["key"] for s in info.get("required_secrets", [])]
+        optional = [s["key"] for s in info.get("optional_secrets", [])]
+
+    all_keys = sorted(existing | set(required) | set(optional))
+
+    table = Table(title=f"Secrets — [cyan]{owner}/{repo_name}[/cyan]")
+    table.add_column("Key")
+    table.add_column("Set", justify="center")
+    if adapter_name:
+        table.add_column("Required", justify="center")
+
+    for key in all_keys:
+        is_set = "[green]✓[/green]" if key in existing else "[red]✗[/red]"
+        if adapter_name:
+            if key in required:
+                req_col = "[red]yes[/red]"
+            elif key in optional:
+                req_col = "[dim]optional[/dim]"
+            else:
+                req_col = ""
+            table.add_row(key, is_set, req_col)
+        else:
+            table.add_row(key, is_set)
+    console.print(table)
+
+
+@app.command("delete-secret")
+def delete_secret_cmd(
+    git_repo: str = typer.Option(..., "--git-repo", help="Client repository URL"),
+    key: str = typer.Option(..., "--key", help="Secret / variable key to delete"),
+    token: Optional[str] = typer.Option(
+        None, "--token",
+        envvar=["GITHUB_TOKEN", "GITLAB_TOKEN"],
+    ),
+):
+    """Delete a single secret / CI variable from a repository."""
+    if not token:
+        console.print("[red]--token is required (or set GITHUB_TOKEN / GITLAB_TOKEN)[/red]")
+        raise typer.Exit(1)
+
+    owner, repo_name = parse_repo_info(git_repo)
+    delete_secret(git_repo, owner, repo_name, key, token)
+
+
+@app.command("show-properties")
+def show_properties(
+    adapter_name: str = typer.Argument(..., help="Adapter name (as in adapters.json)"),
+):
+    """Show git providers, cloud providers, services, and CI templates for an adapter."""
+    catalog = get_adapter_catalog()
+    if adapter_name not in catalog:
+        console.print(f"[red]Adapter '{adapter_name}' not found.[/red] Available: {list(catalog)}")
+        raise typer.Exit(1)
+
+    info = catalog[adapter_name]
+
+    props = Table(title=f"[cyan]{adapter_name}[/cyan] properties", show_header=False, box=None)
+    props.add_column("Property", style="dim", min_width=20)
+    props.add_column("Value")
+    props.add_row("Display name", info.get("display_name", ""))
+    props.add_row("Description", info.get("description", ""))
+    props.add_row("Hub name", info.get("hub_name", ""))
+    props.add_row("Source URL", info.get("url") or info.get("path", ""))
+    props.add_row("Type", info.get("type", ""))
+    props.add_row("Git providers", ", ".join(info.get("git_providers", [])) or "—")
+    props.add_row("Cloud providers", ", ".join(info.get("cloud_providers", [])) or "—")
+
+    ci = info.get("ci_templates", {})
+    props.add_row("CI templates", ", ".join(ci.keys()) if ci else "—")
+    console.print(props)
+
+    services = info.get("services", [])
+    if services:
+        svc_table = Table(title="Services", show_header=True)
+        svc_table.add_column("Service", style="cyan")
+        svc_table.add_column("Description")
+        for s in services:
+            svc_table.add_row(s.get("name", ""), s.get("description", ""))
+        console.print(svc_table)
+
+
+@app.command("show-services")
+def show_services(
+    adapter_name: str = typer.Argument(..., help="Adapter name (as in adapters.json)"),
+):
+    """List the services bundled in an adapter."""
+    catalog = get_adapter_catalog()
+    if adapter_name not in catalog:
+        console.print(f"[red]Adapter '{adapter_name}' not found.[/red] Available: {list(catalog)}")
+        raise typer.Exit(1)
+
+    services = catalog[adapter_name].get("services", [])
+    if not services:
+        console.print(f"[yellow]No services defined for '{adapter_name}'.[/yellow]")
+        return
+
+    table = Table(title=f"[cyan]{adapter_name}[/cyan] services")
+    table.add_column("Service", style="cyan bold")
+    table.add_column("Description")
+    for s in services:
+        table.add_row(s.get("name", ""), s.get("description", ""))
+    console.print(table)
+
+
+@app.command("show-secrets-template")
+def show_secrets_template(
+    adapter_name: str = typer.Argument(..., help="Adapter name (as in adapters.json)"),
+    cloud_provider: str = typer.Option("aws", "--cloud", help="Cloud provider filter (aws)"),
+    git_provider: str = typer.Option("github", "--git-provider", help="Git provider (github | gitlab)"),
+):
+    """Print a JSON secrets template for the adapter — copy, fill values, upload to AWS/GitHub."""
+    import json as _json
+
+    catalog = get_adapter_catalog()
+    if adapter_name not in catalog:
+        console.print(f"[red]Adapter '{adapter_name}' not found.[/red] Available: {list(catalog)}")
+        raise typer.Exit(1)
+
+    info = catalog[adapter_name]
+    required = info.get("required_secrets", [])
+    optional = info.get("optional_secrets", [])
+
+    template: dict = {}
+    for s in required:
+        template[s["key"]] = ""
+    for s in optional:
+        template[s["key"]] = ""
+
+    console.print(f"\n[bold]Secrets template for[/bold] [cyan]{adapter_name}[/cyan] "
+                  f"(cloud: {cloud_provider}, git: {git_provider})\n")
+    console.print(_json.dumps(template, indent=2))
+
+    if required:
+        console.print("\n[bold red]Required keys:[/bold red]")
+        for s in required:
+            console.print(f"  [red]•[/red] [bold]{s['key']}[/bold] — {s.get('description', '')}")
+
+    if optional:
+        console.print("\n[dim]Optional keys:[/dim]")
+        for s in optional:
+            console.print(f"  [dim]•[/dim] {s['key']} — {s.get('description', '')}")
 
 
 if __name__ == "__main__":
