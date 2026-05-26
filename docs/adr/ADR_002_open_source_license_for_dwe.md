@@ -16,7 +16,7 @@ Ponder is going to open source the core code used for its Data Warehouse for Edu
 | DBT-Core | Apache 2.0 |
 | Superset | Apache 2.0 |
 | Docker-engine | Apache 2.0 |
-| Open-tofu (fork of Terraform) | Mozilla Public License 2.0 |
+| Pulumi | Apache 2.0 |
 | Coder-community | GNU Affero General Public License - GNU Project - Free Software Foundation |
 | Cube Core | Client - MIT Backend - Apache 2.0 |
 
