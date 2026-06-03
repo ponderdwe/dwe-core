@@ -1,6 +1,6 @@
 {
   "dwe_cube": {
-    "url": "https://github.com/ponderedw/dwe_cube",
+    "url": "https://github.com/ponderdwe/dwe_cube",
     "type": "git",
     "description": "Cube.js semantic layer + CubeStore + Milvus vector DB + RAG FastAPI"
   }
