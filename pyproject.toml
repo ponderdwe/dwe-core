@@ -4,9 +4,13 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "dwe-core"
-version = "0.1.0a3"
+version = "0.1.0"
 description = "DWE CLI - Data Warehouse Ecosystem Orchestrator"
 readme = "README.md"
+license = "Apache-2.0"
+authors = ["Ponder <ponder-all@ponder.co>"]
+homepage = "https://github.com/ponderdwe-org/dwe-core"
+repository = "https://github.com/ponderdwe-org/dwe-core"
 packages = [{ include = "dwe" }]
 include = [{ path = "dwe/adapters.json" }]
 
