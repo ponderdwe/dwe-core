@@ -54,5 +54,52 @@
       {"key": "LLM_MODEL_ID", "description": "LLM model identifier", "destination": "secrets_manager"},
       {"key": "LLM_API_KEY", "description": "LLM API key (if not using Bedrock)", "destination": "secrets_manager"}
     ]
+  },
+  "dwe_dbt_kg": {
+    "url": "https://github.com/ponderedw/dwe_dbt_kg",
+    "type": "git",
+    "description": "dbt Knowledge Graph — FalkorDB graph database + GraphRAG + Streamlit chat UI",
+    "hub_name": "dbt_kg",
+    "display_name": "dbt Knowledge Graph",
+    "icon": "diagram-3",
+    "git_providers": ["github", "gitlab"],
+    "cloud_providers": ["aws"],
+    "services": [
+      {"name": "FalkorDB", "description": "Graph database storing dbt model lineage, dependencies, and metadata"},
+      {"name": "FastAPI", "description": "REST API for uploading dbt manifests, building graph + vector indexes, and serving the chat agent"},
+      {"name": "Streamlit Chat", "description": "Password-protected chat UI — graph traversal, full-text search, and semantic RAG over your dbt project"},
+      {"name": "Application Load Balancer", "description": "HTTP -> HTTPS redirect + HTTPS termination. Configurable as internet-facing or internal (VPC-only) via ALB_INTERNAL secret"},
+      {"name": "DNS", "description": "Route53 CNAME record pointing to the ALB"},
+      {"name": "EC2 DNS", "description": "Route53 A record pointing directly to the EC2 instance IP — private IP for internal ALB, public IP for internet-facing"}
+    ],
+    "required_secrets": [
+      {"key": "AWS_ACCESS_KEY_ID", "description": "AWS access key — Pulumi uses this to provision infrastructure and SSM to redeploy the app", "destination": "ci"},
+      {"key": "AWS_SECRET_ACCESS_KEY", "description": "AWS secret key", "destination": "ci"},
+      {"key": "PULUMI_S3_STATE", "description": "S3 URL for Pulumi state backend, e.g. s3://my-pulumi-state-bucket", "destination": "ci"},
+      {"key": "ROUTE53_ZONE_ID", "description": "Route53 hosted zone ID (e.g. Z1D633PJN98FT9)", "destination": "secrets_manager"},
+      {"key": "DNS_NAME", "description": "Public DNS name for the chat UI (e.g. dbt-kg.myorg.com)", "destination": "secrets_manager"},
+      {"key": "ACM_CERTIFICATE_ARN", "description": "ACM certificate ARN for HTTPS on the ALB (must cover DNS_NAME)", "destination": "secrets_manager"},
+      {"key": "VPC_ID", "description": "AWS VPC ID where the infrastructure is deployed", "destination": "secrets_manager"},
+      {"key": "ALB_SUBNET_IDS", "description": "JSON array of public subnet IDs for the ALB (e.g. [\"subnet-aaa\",\"subnet-bbb\"])", "destination": "secrets_manager"},
+      {"key": "KEY_NAME", "description": "EC2 key pair name for SSH access", "destination": "secrets_manager"},
+      {"key": "EC2_SECURITY_GROUP_ID", "description": "Additional EC2 security group ID to attach", "destination": "secrets_manager"},
+      {"key": "LB_SECURITY_GROUP_ID", "description": "Security group ID to attach to the load balancer", "destination": "secrets_manager"},
+      {"key": "ALB_INTERNAL", "description": "Set to 'true' for internal ALB (VPC-only), 'false' for internet-facing. Default: false", "destination": "secrets_manager"},
+      {"key": "git_deploy_token", "description": "GitHub / GitLab token — EC2 uses this to clone the repo on first boot", "destination": "secrets_manager"},
+      {"key": "git_deploy_username", "description": "Username paired with git_deploy_token for HTTPS clone", "destination": "secrets_manager"},
+      {"key": "LLM_MODEL_ID", "description": "LLM model identifier in provider:model format (e.g. bedrock:anthropic.claude-sonnet-4-20250514-v1:0)", "destination": "secrets_manager"},
+      {"key": "SECRET_KEY", "description": "FastAPI session middleware secret — generate with: openssl rand -hex 32", "destination": "secrets_manager"},
+      {"key": "FAST_API_ACCESS_SECRET_TOKEN", "description": "Shared token between Streamlit and FastAPI — generate with: openssl rand -hex 32", "destination": "secrets_manager"},
+      {"key": "STREAMLIT_PASSWORD", "description": "Password shown on the Streamlit login screen", "destination": "secrets_manager"}
+    ],
+    "optional_secrets": [
+      {"key": "HOSTED_ZONE_ID_EC2_DNS", "description": "Route53 hosted zone ID for the EC2 DNS A record", "destination": "secrets_manager"},
+      {"key": "EC2_DNS", "description": "DNS name for the EC2 instance A record (e.g. dbt-kg.internal.myorg.com)", "destination": "secrets_manager"},
+      {"key": "AWS_DEFAULT_REGION", "description": "AWS region (default: us-east-1)", "destination": "secrets_manager"},
+      {"key": "GRAPH_USER", "description": "FalkorDB username (only required if FalkorDB auth is enabled)", "destination": "secrets_manager"},
+      {"key": "GRAPH_PASSWORD", "description": "FalkorDB password (only required if FalkorDB auth is enabled)", "destination": "secrets_manager"},
+      {"key": "LLM_API_KEY", "description": "API key for the LLM provider (not needed when using Bedrock IAM auth)", "destination": "secrets_manager"},
+      {"key": "BEDROCK_RERANKER_MODEL_ARN", "description": "Full ARN of the Bedrock reranker model (defaults to Cohere Rerank v3.5 in the deployment region)", "destination": "secrets_manager"}
+    ]
   }
 }

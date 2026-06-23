@@ -37,6 +37,81 @@ class HydrationError(Exception):
     pass
 
 
+def list_adapter_refs(adapter_hub_name: str, token: str = "") -> list[dict]:
+    """
+    Return available branches/tags for an adapter's template repository.
+
+    Only ``main`` (latest) and ``v_*`` versioned refs are included.
+    GitHub release notes are attached where a matching release exists.
+
+    Returns a list of dicts: [{"name": str, "notes": str | None}, ...]
+    ``main`` comes first; ``v_*`` follow in descending order.
+
+    Returns [] on any error or when the adapter uses a local path.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    from dwe.registry import get_adapter_by_hub_name
+
+    try:
+        adapter_info = get_adapter_by_hub_name(adapter_hub_name)
+        if not adapter_info:
+            return []
+
+        url = adapter_info.get("url", "")
+        if not url or "github.com" not in url:
+            return []
+
+        slug = url.rstrip("/").removesuffix(".git")
+        if slug.startswith("https://github.com/"):
+            slug = slug[len("https://github.com/"):]
+        parts = slug.split("/")
+        if len(parts) < 2:
+            return []
+        owner, repo = parts[0], parts[1]
+
+        headers = {"Accept": "application/vnd.github+json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        def _get(endpoint: str) -> list:
+            req = urllib.request.Request(
+                f"https://api.github.com/repos/{owner}/{repo}/{endpoint}?per_page=100",
+                headers=headers,
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return _json.loads(resp.read().decode())
+            except urllib.error.URLError:
+                return []
+
+        # Collect branch and tag names
+        names: list[str] = []
+        for endpoint in ("branches", "tags"):
+            names.extend(
+                item["name"] for item in _get(endpoint) if isinstance(item, dict)
+            )
+
+        # Fetch releases to get per-tag notes
+        release_notes: dict[str, str] = {
+            r["tag_name"]: r.get("body") or ""
+            for r in _get("releases")
+            if isinstance(r, dict) and r.get("tag_name")
+        }
+
+        # Filter to main + v_* only
+        keep = [n for n in names if n == "main" or n.startswith("v_")]
+        versioned = sorted([n for n in keep if n != "main"], reverse=True)
+        ordered = (["main"] if "main" in keep else []) + versioned
+
+        return [{"name": n, "notes": release_notes.get(n) or None} for n in ordered]
+
+    except Exception:
+        return []
+
+
 def hydrate_repo(
     *,
     adapter_hub_name: str,
@@ -50,6 +125,7 @@ def hydrate_repo(
     git_provider: str = "github",
     inject_ci_secrets: bool = False,
     branch_prefix: str = "dwe-hub",
+    template_ref: str = "HEAD",
 ) -> dict:
     """
     Clone a client repo, hydrate it with the adapter template via Copier,
@@ -142,6 +218,7 @@ def hydrate_repo(
         copier.run_copy(
             src_path=adapter_src,
             dst_path=repo_path,
+            vcs_ref=template_ref,
             data={
                 "project_name": repo_name,
                 "adapter_name": adapter_key,
@@ -158,7 +235,11 @@ def hydrate_repo(
         )
 
         # ── 5. Write dwe-state.json ──────────────────────────────────────────
-        write_state(repo_path, adapter_key, adapter_info.get("version", "v1.0.0"), environments)
+        version = (
+            template_ref[2:] if template_ref.startswith("v_")
+            else adapter_info.get("version", "v1.0.0")
+        )
+        write_state(repo_path, adapter_key, version, environments)
 
         # ── 6. Generate CI/CD workflows ──────────────────────────────────────
         _generate_ci_workflows(

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import json
-from datetime import date
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -38,7 +38,7 @@ def write_state(
         "adapter": {
             "name": adapter_name,
             "version": version,
-            "last_update": date.today().isoformat(),
+            "last_update": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         },
         "environments": environments,
         "infrastructure": "pulumi",
@@ -49,6 +49,6 @@ def write_state(
 def update_state_version(repo_path: str, new_version: str) -> dict:
     state = read_state(repo_path)
     state["adapter"]["version"] = new_version
-    state["adapter"]["last_update"] = date.today().isoformat()
+    state["adapter"]["last_update"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     (Path(repo_path) / STATE_FILE).write_text(json.dumps(state, indent=2))
     return state

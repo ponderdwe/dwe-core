@@ -3,5 +3,10 @@
     "url": "https://github.com/ponderdwe/dwe_cube",
     "type": "git",
     "description": "Cube.js semantic layer + CubeStore + Milvus vector DB + RAG FastAPI"
+  },
+  "dwe_dbt_kg": {
+    "url": "https://github.com/ponderdwe/dwe_dbt_kg",
+    "type": "git",
+    "description": "dbt Knowledge Graph — FalkorDB graph database + GraphRAG + Streamlit chat UI"
   }
 }
