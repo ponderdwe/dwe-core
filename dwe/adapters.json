@@ -90,14 +90,17 @@
       {"key": "LLM_MODEL_ID", "description": "LLM model identifier in provider:model format (e.g. bedrock:anthropic.claude-sonnet-4-20250514-v1:0)", "destination": "secrets_manager"},
       {"key": "SECRET_KEY", "description": "FastAPI session middleware secret — generate with: openssl rand -hex 32", "destination": "secrets_manager"},
       {"key": "FAST_API_ACCESS_SECRET_TOKEN", "description": "Shared token between Streamlit and FastAPI — generate with: openssl rand -hex 32", "destination": "secrets_manager"},
-      {"key": "STREAMLIT_PASSWORD", "description": "Password shown on the Streamlit login screen", "destination": "secrets_manager"}
+      {"key": "STREAMLIT_PASSWORD", "description": "Password shown on the Streamlit login screen", "destination": "secrets_manager"},
+      {"key": "POSTGRES_PASSWORD", "description": "PostgreSQL password for the LangGraph chat-history checkpointer", "destination": "secrets_manager"}
     ],
     "optional_secrets": [
       {"key": "HOSTED_ZONE_ID_EC2_DNS", "description": "Route53 hosted zone ID for the EC2 DNS A record", "destination": "secrets_manager"},
       {"key": "EC2_DNS", "description": "DNS name for the EC2 instance A record (e.g. dbt-kg.internal.myorg.com)", "destination": "secrets_manager"},
       {"key": "AWS_DEFAULT_REGION", "description": "AWS region (default: us-east-1)", "destination": "secrets_manager"},
-      {"key": "GRAPH_USER", "description": "FalkorDB username (only required if FalkorDB auth is enabled)", "destination": "secrets_manager"},
-      {"key": "GRAPH_PASSWORD", "description": "FalkorDB password (only required if FalkorDB auth is enabled)", "destination": "secrets_manager"},
+      {"key": "GRAPH_USER", "description": "FalkorDB username for FastAPI connections (use 'default' unless custom ACLs are configured)", "destination": "secrets_manager"},
+      {"key": "GRAPH_PASSWORD", "description": "FalkorDB password — set as requirepass via REDIS_ARGS", "destination": "secrets_manager"},
+      {"key": "POSTGRES_USER", "description": "PostgreSQL username (default: postgres)", "destination": "secrets_manager"},
+      {"key": "POSTGRES_DB", "description": "PostgreSQL database name (default: chat_db)", "destination": "secrets_manager"},
       {"key": "LLM_API_KEY", "description": "API key for the LLM provider (not needed when using Bedrock IAM auth)", "destination": "secrets_manager"},
       {"key": "BEDROCK_RERANKER_MODEL_ARN", "description": "Full ARN of the Bedrock reranker model (defaults to Cohere Rerank v3.5 in the deployment region)", "destination": "secrets_manager"}
     ]

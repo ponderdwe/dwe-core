@@ -117,6 +117,60 @@ Internally:
 
 Review the diff on the branch, then merge into your environment branches to trigger deployments.
 
+### `dwe local-development`
+
+```
+dwe local-development <adapter_name> <secret> \
+  [--output-dir <path>]      \   # default: current directory
+  [--adapter-path <path>]    \   # override auto-detected template path
+  [--aws-region <region>]        # default: us-east-1
+```
+
+Creates a local development folder from an adapter template, seeded with runtime config pulled directly from AWS Secrets Manager. No git repository is initialised — the output is a plain directory ready for `docker compose up`.
+
+**If the folder already exists it is wiped and recreated from scratch** — running the command again is a clean reset.
+
+**Example:**
+
+```bash
+dwe local-development dwe_cube my-cube-secret --aws-region us-east-1
+```
+
+What happens internally:
+
+```
+1. Locate       Finds the local Copier template for the adapter
+                (auto-detected from monorepo structure, or --adapter-path)
+2. Reset        Deletes <output-dir>/<adapter_name>/ if it already exists
+3. Fetch        Calls AWS Secrets Manager to retrieve <secret> as JSON
+4. Hydrate      Runs Copier to render the adapter template into the new folder
+5. .env         Writes all secret key=value pairs to .env in the output folder
+```
+
+After the command completes:
+
+```
+dwe_cube/
+├── docker-compose.yml
+├── justfile
+├── .env                  ← populated from AWS Secrets Manager
+└── ...                   ← everything else from the adapter template
+```
+
+Start the stack:
+
+```bash
+cd dwe_cube
+docker compose up
+```
+
+**Adapter path resolution** (in order):
+1. `--adapter-path` flag (explicit override)
+2. `path` field in `adapters.json` (if set)
+3. Auto-detect: sibling directory of `dwe-core/` in the monorepo root named `<adapter_name>`
+
+**AWS credentials** — the command uses `boto3` and picks up credentials the standard way: environment variables (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`), `~/.aws/credentials`, an IAM role, etc.
+
 ### `dwe list-adapters`
 
 ```bash
@@ -704,5 +758,6 @@ Go to `github.com/<org>/dwe-core/releases`, click **Draft a new release**, selec
 | GitHub secrets | [PyGithub](https://pygithub.readthedocs.io/) |
 | GitLab variables | [python-gitlab](https://python-gitlab.readthedocs.io/) |
 | Runtime templating | [Jinja2](https://jinja.palletsprojects.com/) (for CI templates) |
+| AWS Secrets Manager | [boto3](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html) |
 | Infrastructure | [Pulumi](https://www.pulumi.com/) |
 | Task runner | [Just](https://just.systems/) |

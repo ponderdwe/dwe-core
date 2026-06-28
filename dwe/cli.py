@@ -66,6 +66,30 @@ console = Console()
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _resolve_local_adapter_path(adapter_name: str, explicit_path: Optional[str]) -> Optional[str]:
+    """Return the local Copier template directory for an adapter.
+
+    Resolution order:
+      1. --adapter-path flag
+      2. adapters.json 'path' field
+      3. Auto-detect: sibling of dwe-core/ in the monorepo root
+    """
+    if explicit_path:
+        return explicit_path
+
+    adapter_info = get_adapter(adapter_name)
+    if adapter_info and adapter_info.get("path"):
+        return adapter_info["path"]
+
+    # __file__ is dwe-core/dwe/cli.py → 2 levels up = dwe-core/ → 1 more = monorepo root
+    monorepo_root = Path(__file__).parent.parent.parent
+    candidate = monorepo_root / adapter_name
+    if candidate.exists():
+        return str(candidate)
+
+    return None
+
+
 def _resolve_adapter_version(adapter_path: str, tag: Optional[str]) -> str:
     """Read version from adapter.json (or copier.yml default), preferring --tag."""
     if tag:
@@ -585,6 +609,102 @@ def show_secrets_template(
         console.print("\n[dim]Optional keys:[/dim]")
         for s in optional:
             console.print(f"  [dim]•[/dim] {s['key']} — {s.get('description', '')}")
+
+
+@app.command("local-development")
+def local_development(
+    adapter_name: str = typer.Argument(..., help="Adapter name (from registry, e.g. dwe_cube)"),
+    secret: str = typer.Argument(..., help="AWS Secrets Manager secret name"),
+    output_dir: Optional[str] = typer.Option(
+        None, "--output-dir", "-o",
+        help="Parent directory for the local dev folder (default: current directory)",
+    ),
+    adapter_path: Optional[str] = typer.Option(
+        None, "--adapter-path",
+        help="Local path to the adapter template (default: auto-detected from monorepo structure)",
+    ),
+    aws_region: str = typer.Option("us-east-1", "--aws-region", help="AWS region for Secrets Manager"),
+):
+    """Create a local development folder from an adapter, seeded with secrets from AWS.
+
+    If the folder already exists it is wiped and recreated from scratch (idempotent reset).
+    """
+    import copier
+    import shutil
+    import boto3
+
+    console.print(Panel(
+        f"[bold]DWE Local Development[/bold]\n"
+        f"Adapter: [cyan]{adapter_name}[/cyan]  Secret: [cyan]{secret}[/cyan]",
+        expand=False,
+    ))
+
+    # 1. Resolve adapter template path
+    resolved_adapter_path = _resolve_local_adapter_path(adapter_name, adapter_path)
+    if not resolved_adapter_path or not Path(resolved_adapter_path).exists():
+        console.print(
+            f"[red]Cannot locate adapter template for '{adapter_name}'.[/red]\n"
+            "Use --adapter-path to provide the path explicitly."
+        )
+        raise typer.Exit(1)
+    console.print(f"[dim]Adapter template: {resolved_adapter_path}[/dim]")
+
+    # 2. Determine output folder: <output_dir>/<adapter_name>
+    base_dir = Path(output_dir) if output_dir else Path.cwd()
+    dest = base_dir / adapter_name
+
+    # 3. Wipe and recreate (idempotent reset)
+    if dest.exists():
+        console.print(f"[yellow]Removing existing folder:[/yellow] {dest}")
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True)
+    console.print(f"[dim]Output folder: {dest}[/dim]")
+
+    # 4. Fetch secrets from AWS Secrets Manager
+    console.print(f"[blue]Fetching secret:[/blue] {secret} (region: {aws_region})")
+    try:
+        sm = boto3.client("secretsmanager", region_name=aws_region)
+        response = sm.get_secret_value(SecretId=secret)
+        secrets_dict: dict = json.loads(response["SecretString"])
+        console.print(f"[green]Fetched {len(secrets_dict)} secret key(s).[/green]")
+    except Exception as exc:
+        console.print(f"[red]Failed to fetch secret '{secret}':[/red] {exc}")
+        raise typer.Exit(1)
+
+    # 5. Run Copier to hydrate the folder
+    console.print("[blue]Running Copier...[/blue]")
+    copier.run_copy(
+        src_path=resolved_adapter_path,
+        dst_path=str(dest),
+        data={
+            "project_name": adapter_name.replace("_", "-"),
+            "adapter_name": adapter_name,
+            "adapter_version": "local",
+            "environments": ["development"],
+            "aws_region": aws_region,
+            "instance_type": "t3.micro",
+            "git_platform": "github",
+        },
+        defaults=True,
+        overwrite=True,
+        unsafe=True,
+    )
+
+    # 6. Write .env file from the fetched secret
+    env_path = dest / ".env"
+    env_lines = [f"{k}={v}" for k, v in secrets_dict.items()]
+    env_path.write_text("\n".join(env_lines) + "\n")
+    console.print(f"[green].env written:[/green] {env_path} ({len(secrets_dict)} keys)")
+
+    # Summary
+    table = Table(title="[green]Local Development Ready[/green]")
+    table.add_column("", style="dim")
+    table.add_column("")
+    table.add_row("Adapter", adapter_name)
+    table.add_row("Local path", str(dest))
+    table.add_row("Secrets", f"{len(secrets_dict)} key(s) → .env")
+    table.add_row("Run", f"cd {dest} && docker compose up")
+    console.print(table)
 
 
 if __name__ == "__main__":
