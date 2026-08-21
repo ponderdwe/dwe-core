@@ -1,2 +1,6 @@
 dwe/__pycache__
+tests/__pycache__
 local_development
+.agents/
+.claude/skills/
+skills-lock.json
