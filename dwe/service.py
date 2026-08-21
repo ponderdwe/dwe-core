@@ -126,6 +126,7 @@ def hydrate_repo(
     inject_ci_secrets: bool = False,
     branch_prefix: str = "dwe-hub",
     template_ref: str = "HEAD",
+    base_branch: str = "main",
 ) -> dict:
     """
     Clone a client repo, hydrate it with the adapter template via Copier,
@@ -212,8 +213,15 @@ def hydrate_repo(
         # ── 3. Clone client repo ─────────────────────────────────────────────
         logger.info("Cloning %s into %s", git_repo, tmpdir)
         repo, repo_path = clone_repo(authed_url, tmpdir)
+        repo.git.checkout(base_branch)
 
-        # ── 4. Run Copier — hydrate adapter template into clone ──────────────
+        # ── 4. Resolve adapter version ───────────────────────────────────────
+        version = (
+            template_ref[2:] if template_ref.startswith("v_")
+            else adapter_info.get("version", "v1.0.0")
+        )
+
+        # ── 5. Run Copier — hydrate adapter template into clone ──────────────
         logger.info("Running copier.run_copy src=%s dst=%s", adapter_src, repo_path)
         copier.run_copy(
             src_path=adapter_src,
@@ -222,7 +230,7 @@ def hydrate_repo(
             data={
                 "project_name": repo_name,
                 "adapter_name": adapter_key,
-                "adapter_version": adapter_info.get("version", "v1.0.0"),
+                "adapter_version": version,
                 "environments": environments,
                 "aws_region": aws_region,
                 "instance_type": instance_type,
@@ -234,14 +242,23 @@ def hydrate_repo(
             unsafe=True,
         )
 
-        # ── 5. Write dwe-state.json ──────────────────────────────────────────
-        version = (
-            template_ref[2:] if template_ref.startswith("v_")
-            else adapter_info.get("version", "v1.0.0")
+        # ── 5b. Write dwe-hydration.yaml (excluded from Copier output) ───────
+        _write_hydration_yaml(
+            repo_path=repo_path,
+            adapter_local_path=adapter_info.get("path", ""),
+            data={
+                "adapter_name": adapter_key,
+                "project_name": repo_name,
+                "git_repo_url": git_repo,
+                "adapter_version": version,
+                "environments": environments,
+            },
         )
+
+        # ── 6. Write dwe-state.json ──────────────────────────────────────────
         write_state(repo_path, adapter_key, version, environments)
 
-        # ── 6. Generate CI/CD workflows ──────────────────────────────────────
+        # ── 7. Generate CI/CD workflows ──────────────────────────────────────
         _generate_ci_workflows(
             adapter_src=adapter_src,
             repo_path=repo_path,
@@ -254,13 +271,13 @@ def hydrate_repo(
             shutil.rmtree(ci_templates_dir)
             logger.info("Removed ci-templates from repo (CI files already generated)")
 
-        # ── 7. Create branch, commit, push ───────────────────────────────────
+        # ── 8. Create branch, commit, push ───────────────────────────────────
         create_and_checkout_branch(repo, branch_name)
         commit_all(repo, f"chore: DWE Hub hydration [{adapter_key}] {datetime.now().isoformat()}")
         push_branch(repo, branch_name)
         logger.info("Pushed branch '%s' to %s", branch_name, git_repo)
 
-        # ── 8. Optionally push CI-only secrets to GitHub/GitLab ─────────────
+        # ── 9. Optionally push CI-only secrets to GitHub/GitLab ─────────────
         if inject_ci_secrets and secrets and token:
             ci_secrets = _filter_ci_secrets(adapter_info, secrets)
             logger.info(
@@ -286,6 +303,47 @@ def hydrate_repo(
 # ─────────────────────────────────────────────────────────────────────────────
 # Internal helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _write_hydration_yaml(
+    repo_path: str,
+    adapter_local_path: str,
+    data: dict,
+) -> None:
+    """Render pulumi/dwe-hydration.yaml from the adapter's jinja template.
+
+    Lookup order:
+      1. pulumi/dwe-hydration.yaml.jinja in the destination (if Copier placed it there)
+      2. pulumi/dwe-hydration.yaml.jinja in the adapter local path (local adapters only)
+      3. Fall back: write `data` directly as YAML (remote adapters with no template access)
+    """
+    import yaml
+    from jinja2 import Template
+
+    hydration_path = Path(repo_path) / "pulumi" / "dwe-hydration.yaml"
+    if not hydration_path.parent.exists():
+        return
+
+    dest_jinja = Path(repo_path) / "pulumi" / "dwe-hydration.yaml.jinja"
+    template_path = None
+
+    if dest_jinja.exists():
+        template_path = dest_jinja
+    elif adapter_local_path:
+        candidate = Path(adapter_local_path) / "pulumi" / "dwe-hydration.yaml.jinja"
+        if candidate.exists():
+            template_path = candidate
+
+    if template_path:
+        hydration_path.write_text(Template(template_path.read_text()).render(**data))
+        if dest_jinja.exists():
+            dest_jinja.unlink()
+    else:
+        hydration_path.write_text(
+            yaml.safe_dump(data, default_flow_style=False, sort_keys=False)
+        )
+
+    logger.info("Written pulumi/dwe-hydration.yaml")
+
 
 def _filter_ci_secrets(adapter_info: dict, secrets: dict) -> dict:
     """Return only the secrets whose destination includes 'ci' per the adapter catalog."""
