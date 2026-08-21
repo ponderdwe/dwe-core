@@ -120,13 +120,12 @@ def hydrate_repo(
     token: str,
     git_username: str = "",
     secrets: Optional[dict] = None,
-    aws_region: str = "us-east-1",
-    instance_type: str = "t3.xlarge",
     git_provider: str = "github",
     inject_ci_secrets: bool = False,
     branch_prefix: str = "dwe-hub",
     template_ref: str = "HEAD",
     base_branch: str = "main",
+    extra_data: Optional[dict] = None,
 ) -> dict:
     """
     Clone a client repo, hydrate it with the adapter template via Copier,
@@ -148,16 +147,16 @@ def hydrate_repo(
         Git provider token for clone + push (and optionally secret injection).
     secrets : dict, optional
         Key/value secrets.  Injected into GitHub/GitLab if inject_ci_secrets=True.
-    aws_region : str
-        AWS region passed as a Copier variable.
-    instance_type : str
-        EC2 instance type passed as a Copier variable.
     git_provider : str
         "github" or "gitlab".
     inject_ci_secrets : bool
         If True, push only destination=ci secrets to the repo's CI/CD secret store.
     branch_prefix : str
         Prefix for the created branch (default "dwe-hub").
+    extra_data : dict, optional
+        Adapter-specific Copier template variables (e.g. aws_region, cloud_provider,
+        instance_type).  Merged into the Copier data dict, hydration yaml, and CI
+        template context — dwe-core passes them through without interpreting them.
 
     Returns
     -------
@@ -223,6 +222,7 @@ def hydrate_repo(
 
         # ── 5. Run Copier — hydrate adapter template into clone ──────────────
         logger.info("Running copier.run_copy src=%s dst=%s", adapter_src, repo_path)
+        _extra = dict(extra_data or {})
         copier.run_copy(
             src_path=adapter_src,
             dst_path=repo_path,
@@ -232,10 +232,9 @@ def hydrate_repo(
                 "adapter_name": adapter_key,
                 "adapter_version": version,
                 "environments": environments,
-                "aws_region": aws_region,
-                "instance_type": instance_type,
                 "git_platform": git_provider,
                 "git_repo_url": git_repo,
+                **_extra,
             },
             defaults=True,
             overwrite=True,
@@ -252,6 +251,7 @@ def hydrate_repo(
                 "git_repo_url": git_repo,
                 "adapter_version": version,
                 "environments": environments,
+                **_extra,
             },
         )
 
@@ -264,8 +264,8 @@ def hydrate_repo(
             repo_path=repo_path,
             workspace_mappings=workspace_mappings,
             platform=git_provider,
-            aws_region=aws_region,
             project_name=repo_name,
+            extra_data=_extra,
         )
         ci_templates_dir = Path(repo_path) / "ci-templates"
         if ci_templates_dir.exists():
@@ -378,8 +378,8 @@ def _generate_ci_workflows(
     repo_path: str,
     workspace_mappings: list[dict],
     platform: str,
-    aws_region: str,
     project_name: str = "",
+    extra_data: Optional[dict] = None,
 ) -> None:
     from jinja2 import Environment, FileSystemLoader
 
@@ -401,6 +401,10 @@ def _generate_ci_workflows(
 
     template = jinja_env.get_template(template_file)
 
+    # Expose extra_data to CI templates as uppercase vars (aws_region → AWS_REGION)
+    # so templates can reference provider-specific config without dwe-core knowing the keys.
+    ci_extra = {k.upper(): v for k, v in (extra_data or {}).items()}
+
     if platform == "github":
         workflows_dir = Path(repo_path) / ".github" / "workflows"
         workflows_dir.mkdir(parents=True, exist_ok=True)
@@ -412,8 +416,8 @@ def _generate_ci_workflows(
                 ENV_NAME=env_name,
                 WORKSPACE_NAME=workspace,
                 SECRET_NAME=secret_name,
-                AWS_REGION=aws_region,
                 PROJECT_NAME=project_name,
+                **ci_extra,
             )
             out = workflows_dir / f"deploy-{env_name}.yaml"
             out.write_text(rendered)
@@ -429,8 +433,8 @@ def _generate_ci_workflows(
                 ENV_NAME=env_name,
                 WORKSPACE_NAME=workspace,
                 SECRET_NAME=secret_name,
-                AWS_REGION=aws_region,
                 PROJECT_NAME=project_name,
+                **ci_extra,
             ))
         out = Path(repo_path) / ".gitlab-ci.yml"
         out.write_text("\n".join(sections))
