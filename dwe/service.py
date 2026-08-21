@@ -265,6 +265,7 @@ def hydrate_repo(
             workspace_mappings=workspace_mappings,
             platform=git_provider,
             aws_region=aws_region,
+            project_name=repo_name,
         )
         ci_templates_dir = Path(repo_path) / "ci-templates"
         if ci_templates_dir.exists():
@@ -378,6 +379,7 @@ def _generate_ci_workflows(
     workspace_mappings: list[dict],
     platform: str,
     aws_region: str,
+    project_name: str = "",
 ) -> None:
     from jinja2 import Environment, FileSystemLoader
 
@@ -411,6 +413,7 @@ def _generate_ci_workflows(
                 WORKSPACE_NAME=workspace,
                 SECRET_NAME=secret_name,
                 AWS_REGION=aws_region,
+                PROJECT_NAME=project_name,
             )
             out = workflows_dir / f"deploy-{env_name}.yaml"
             out.write_text(rendered)
@@ -427,6 +430,7 @@ def _generate_ci_workflows(
                 WORKSPACE_NAME=workspace,
                 SECRET_NAME=secret_name,
                 AWS_REGION=aws_region,
+                PROJECT_NAME=project_name,
             ))
         out = Path(repo_path) / ".gitlab-ci.yml"
         out.write_text("\n".join(sections))
