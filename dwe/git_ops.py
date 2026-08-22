@@ -67,7 +67,10 @@ def commit_all(repo: git.Repo, message: str) -> None:
 def push_branch(repo: git.Repo, branch_name: str) -> None:
     remote = repo.remote("origin")
     console.print(f"[blue]Pushing[/blue] {branch_name}")
-    remote.push(refspec=f"refs/heads/{branch_name}:refs/heads/{branch_name}")
+    results = remote.push(refspec=f"refs/heads/{branch_name}:refs/heads/{branch_name}")
+    for info in results:
+        if info.flags & info.ERROR:
+            raise git.GitCommandError("push", info.summary)
 
 
 def checkout_adapter_tag(adapter_path: str, tag: Optional[str]) -> None:
