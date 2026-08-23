@@ -580,7 +580,7 @@ def show_properties(
     props.add_column("Value")
     props.add_row("Display name", info.get("display_name", ""))
     props.add_row("Description", info.get("description", ""))
-    props.add_row("Hub name", info.get("hub_name", ""))
+    props.add_row("Name", info.get("name", ""))
     props.add_row("Source URL", info.get("url") or info.get("path", ""))
     props.add_row("Type", info.get("type", ""))
     props.add_row("Git providers", ", ".join(info.get("git_providers", [])) or "—")

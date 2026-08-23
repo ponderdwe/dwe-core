@@ -84,10 +84,10 @@ def _load_copier_yml(adapter_info: dict) -> dict:
     return {}
 
 
-def get_adapter_by_hub_name(hub_name: str) -> Optional[dict]:
-    """Look up a catalog entry by its dwe-hub alias (e.g. 'cube' → dwe_cube entry)."""
+def get_adapter_by_name(name: str) -> Optional[dict]:
+    """Look up a catalog entry by its adapter name (e.g. 'cube' → dwe_cube entry)."""
     for entry in get_adapter_catalog().values():
-        if entry.get("hub_name") == hub_name:
+        if entry.get("name") == name:
             return entry
     return None
 
@@ -138,7 +138,7 @@ def get_adapter_catalog() -> dict:
     Return full adapter metadata dict keyed by adapter name (as in adapters.json).
 
     Each entry contains:
-      name, hub_name, url, path, type, description,
+      name, url, path, type, description,
       display_name, icon, required_secrets, optional_secrets,
       ci_secrets, sm_secrets (pre-split by destination for display)
     """
@@ -150,8 +150,7 @@ def get_adapter_catalog() -> dict:
         required = info.get("required_secrets") or meta.get("required_secrets", [])
         optional = info.get("optional_secrets") or meta.get("optional_secrets", [])
         catalog[name] = {
-            "name": name,
-            "hub_name": info.get("hub_name") or meta.get("hub_name", name),
+            "name": info.get("name") or meta.get("hub_name", name),
             "url": info.get("url", ""),
             "path": info.get("path", ""),
             "type": info.get("type", "git"),

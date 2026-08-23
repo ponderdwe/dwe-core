@@ -37,7 +37,7 @@ class HydrationError(Exception):
     pass
 
 
-def list_adapter_refs(adapter_hub_name: str, token: str = "") -> list[dict]:
+def list_adapter_refs(adapter_name: str, token: str = "") -> list[dict]:
     """
     Return available branches/tags for an adapter's template repository.
 
@@ -53,10 +53,10 @@ def list_adapter_refs(adapter_hub_name: str, token: str = "") -> list[dict]:
     import urllib.error
     import urllib.request
 
-    from dwe.registry import get_adapter_by_hub_name
+    from dwe.registry import get_adapter_by_name
 
     try:
-        adapter_info = get_adapter_by_hub_name(adapter_hub_name)
+        adapter_info = get_adapter_by_name(adapter_name)
         if not adapter_info:
             return []
 
@@ -114,7 +114,7 @@ def list_adapter_refs(adapter_hub_name: str, token: str = "") -> list[dict]:
 
 def hydrate_repo(
     *,
-    adapter_hub_name: str,
+    adapter_name: str,
     git_repo: str,
     workspace_mappings: list[dict],
     token: str,
@@ -133,8 +133,8 @@ def hydrate_repo(
 
     Parameters
     ----------
-    adapter_hub_name : str
-        Hub alias (e.g. "cube").  Resolved to the adapter's source URL via the registry.
+    adapter_name : str
+        Adapter name (e.g. "cube").  Resolved to the adapter's source URL via the registry.
     git_repo : str
         Client repository URL (cloned, hydrated, pushed back to).
     workspace_mappings : list[dict]
@@ -172,20 +172,20 @@ def hydrate_repo(
         parse_repo_info,
         push_branch,
     )
-    from dwe.registry import get_adapter_by_hub_name
+    from dwe.registry import get_adapter_by_name
     from dwe.secrets import set_secrets
     from dwe.state import write_state
 
-    # ── 1. Resolve adapter ────────────────────────────────────────���──────────
-    adapter_info = get_adapter_by_hub_name(adapter_hub_name)
+    # ── 1. Resolve adapter ────────────────────────────────────────────────────
+    adapter_info = get_adapter_by_name(adapter_name)
     if not adapter_info:
         raise HydrationError(
-            f"Adapter with hub_name='{adapter_hub_name}' not found in registry."
+            f"Adapter '{adapter_name}' not found in registry."
         )
 
     adapter_src = adapter_info.get("url") or adapter_info.get("path")
     if not adapter_src:
-        raise HydrationError(f"Adapter '{adapter_hub_name}' has no url or path.")
+        raise HydrationError(f"Adapter '{adapter_name}' has no url or path.")
 
     # Inject credentials into the adapter template URL so Copier can clone it.
     # Use git+ prefix so Copier always recognises it as a VCS URL regardless
