@@ -255,6 +255,9 @@ def hydrate_repo(
             },
         )
 
+        # ── 5c. Patch Pulumi stack YAMLs with per-env overrides ──────────────
+        _patch_pulumi_stack_configs(repo_path, workspace_mappings, repo_name)
+
         # ── 6. Write dwe-state.json ──────────────────────────────────────────
         write_state(repo_path, adapter_key, version, environments)
 
@@ -346,6 +349,40 @@ def _write_hydration_yaml(
     logger.info("Written pulumi/dwe-hydration.yaml")
 
 
+def _patch_pulumi_stack_configs(
+    repo_path: str,
+    workspace_mappings: list[dict],
+    project_name: str,
+) -> None:
+    """Patch per-env values from workspace env_config into rendered Pulumi stack YAMLs."""
+    try:
+        import yaml
+    except ImportError:
+        return
+
+    pulumi_dir = Path(repo_path) / "pulumi"
+    if not pulumi_dir.exists():
+        return
+
+    for mapping in workspace_mappings:
+        env_config = mapping.get("env_config") or {}
+        if not env_config:
+            continue
+        workspace = mapping.get("workspace") or mapping.get("branch", "")
+        stack_file = pulumi_dir / f"Pulumi.{workspace}.yaml"
+        if not stack_file.exists():
+            logger.debug("No stack file %s to patch", stack_file.name)
+            continue
+        data = yaml.safe_load(stack_file.read_text()) or {}
+        config = data.setdefault("config", {})
+        for key, val in env_config.items():
+            config_key = f"{project_name}:{key}"
+            if config_key in config:
+                config[config_key] = val
+                logger.info("Patched %s in %s", config_key, stack_file.name)
+        stack_file.write_text(yaml.safe_dump(data, default_flow_style=False, sort_keys=False))
+
+
 def _filter_ci_secrets(adapter_info: dict, secrets: dict) -> dict:
     """Return only the secrets whose destination includes 'ci' per the adapter catalog."""
     all_secrets = adapter_info.get("required_secrets", []) + adapter_info.get("optional_secrets", [])
@@ -412,12 +449,13 @@ def _generate_ci_workflows(
             env_name = mapping["branch"]
             workspace = mapping.get("workspace", env_name)
             secret_name = mapping.get("secret_name", f"DWE_DEPLOY_{env_name.upper()}")
+            env_extra = {k.upper(): v for k, v in mapping.get("env_config", {}).items()}
             rendered = template.render(
                 ENV_NAME=env_name,
                 WORKSPACE_NAME=workspace,
                 SECRET_NAME=secret_name,
                 PROJECT_NAME=project_name,
-                **ci_extra,
+                **{**ci_extra, **env_extra},
             )
             out = workflows_dir / f"deploy-{env_name}.yaml"
             out.write_text(rendered)
@@ -429,12 +467,13 @@ def _generate_ci_workflows(
             env_name = mapping["branch"]
             workspace = mapping.get("workspace", env_name)
             secret_name = mapping.get("secret_name", f"DWE_DEPLOY_{env_name.upper()}")
+            env_extra = {k.upper(): v for k, v in mapping.get("env_config", {}).items()}
             sections.append(template.render(
                 ENV_NAME=env_name,
                 WORKSPACE_NAME=workspace,
                 SECRET_NAME=secret_name,
                 PROJECT_NAME=project_name,
-                **ci_extra,
+                **{**ci_extra, **env_extra},
             ))
         out = Path(repo_path) / ".gitlab-ci.yml"
         out.write_text("\n".join(sections))
