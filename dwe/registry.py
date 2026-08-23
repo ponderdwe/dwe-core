@@ -104,6 +104,35 @@ def _filter_by_dest(secrets: list, target: str) -> list:
     return [s for s in secrets if _has_dest(s.get("destination"), target)]
 
 
+def get_copier_questions(adapter_info: dict) -> list[dict]:
+    """
+    Return copier questions for an adapter, excluding ``when: false`` entries
+    and private keys (starting with ``_``).
+
+    Each entry: {key, type, default, help, choices (optional)}
+    Consumers are responsible for filtering out any keys they set programmatically.
+    """
+    copier = _load_copier_yml(adapter_info)
+    questions = []
+    for key, spec in copier.items():
+        if key.startswith("_"):
+            continue
+        if not isinstance(spec, dict):
+            continue
+        if spec.get("when") is False:
+            continue
+        questions.append({
+            "key": key,
+            "type": spec.get("type", "str"),
+            "default": spec.get("default", ""),
+            "help": spec.get("help", "").strip(),
+            "choices": spec.get("choices"),
+            "editable": spec.get("x_dwe_editable", False),
+            "per_env": spec.get("x_dwe_per_env", False),
+        })
+    return questions
+
+
 def get_adapter_catalog() -> dict:
     """
     Return full adapter metadata dict keyed by adapter name (as in adapters.json).
@@ -139,5 +168,6 @@ def get_adapter_catalog() -> dict:
             "ci_secrets": _filter_by_dest(required, "ci"),
             "sm_required_secrets": _filter_by_dest(required, "secrets_manager"),
             "sm_optional_secrets": _filter_by_dest(optional, "secrets_manager"),
+            "copier_questions": get_copier_questions(info),
         }
     return catalog

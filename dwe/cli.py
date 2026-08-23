@@ -160,8 +160,11 @@ def create_service(
         envvar=["GITHUB_TOKEN", "GITLAB_TOKEN"],
         help="API token for secret injection",
     ),
-    aws_region: str = typer.Option("us-east-1", "--aws-region", help="AWS region"),
-    instance_type: str = typer.Option("t3.micro", "--instance-type", help="EC2 instance type"),
+    set_values: Optional[list[str]] = typer.Option(
+        None, "--set",
+        help="Override editable copier question: --set key=value (repeatable). "
+             "Run `dwe adapter-questions <adapter>` to see available keys.",
+    ),
     clone_dir: Optional[str] = typer.Option(
         None, "--clone-dir", help="Directory to clone into (default: temp dir)"
     ),
@@ -200,7 +203,25 @@ def create_service(
     # 1. Clone client repo
     repo, repo_path = clone_repo(git_repo, clone_dir)
 
-    # 2. Run Copier — hydrates infrastructure/ blueprint/ justfile
+    # 2. Parse --set overrides against editable copier questions
+    from dwe.registry import get_copier_questions
+    questions = get_copier_questions(adapter_info)
+    editable_keys = {q["key"] for q in questions if q.get("editable")}
+    overrides: dict = {}
+    for item in set_values or []:
+        if "=" not in item:
+            console.print(f"[red]--set must be key=value, got:[/red] {item}")
+            raise typer.Exit(1)
+        k, v = item.split("=", 1)
+        if k not in editable_keys:
+            console.print(f"[yellow]Warning:[/yellow] '{k}' is not an editable question for {adapter_name}. Passing anyway.")
+        overrides[k] = v
+
+    # Build copier data: defaults from questions, overridden by --set values
+    copier_data: dict = {q["key"]: q["default"] for q in questions if q.get("editable")}
+    copier_data.update(overrides)
+
+    # 3. Run Copier — hydrates infrastructure/ blueprint/ justfile
     console.print("[blue]Running Copier...[/blue]")
     copier.run_copy(
         src_path=adapter_path,
@@ -210,16 +231,15 @@ def create_service(
             "adapter_name": adapter_name,
             "adapter_version": adapter_version,
             "environments": environments,
-            "aws_region": aws_region,
-            "instance_type": instance_type,
             "git_platform": platform,
+            **copier_data,
         },
         defaults=True,
         overwrite=True,
         unsafe=True,  # allow local paths as template source
     )
 
-    # 3. Write dwe-state.json (CLI-managed, not Copier-managed)
+    # 4. Write dwe-state.json (CLI-managed, not Copier-managed)
     console.print("[blue]Writing dwe-state.json...[/blue]")
     write_state(repo_path, adapter_name, adapter_version, environments)
 
@@ -384,6 +404,37 @@ def list_adapters_cmd(
             for s in optional:
                 secrets_table.add_row(s["key"], "[dim]no[/dim]", s.get("description", ""))
             console.print(secrets_table)
+
+
+@app.command("adapter-questions")
+def adapter_questions_cmd(
+    adapter_name: str = typer.Argument(..., help="Adapter name (from registry)"),
+):
+    """List editable copier questions for an adapter (usable as --set key=value in create-service)."""
+    from dwe.registry import get_adapter, get_copier_questions
+    adapter_info = get_adapter(adapter_name)
+    if not adapter_info:
+        console.print(f"[red]Adapter '{adapter_name}' not found.[/red]")
+        raise typer.Exit(1)
+
+    questions = [q for q in get_copier_questions(adapter_info) if q.get("editable")]
+    if not questions:
+        console.print(f"[yellow]No editable questions for '{adapter_name}'.[/yellow]")
+        return
+
+    table = Table(title=f"Editable questions — {adapter_name}")
+    table.add_column("Key", style="cyan")
+    table.add_column("Default", style="green")
+    table.add_column("Per-env", style="yellow")
+    table.add_column("Help")
+    for q in questions:
+        table.add_row(
+            q["key"],
+            str(q["default"]),
+            "yes" if q.get("per_env") else "no",
+            q.get("help", ""),
+        )
+    console.print(table)
 
 
 @app.command("set-secrets")
