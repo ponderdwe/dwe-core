@@ -1,18 +1,22 @@
 {
   "dwe_cube": {
     "url": "https://github.com/ponderdwe/dwe_cube",
-    "type": "git"
+    "type": "git",
+    "hub_name": "cube"
   },
   "dwe_iceberg_catalog": {
     "url": "https://github.com/ponderdwe/dwe_iceberg_catalog",
-    "type": "git"
+    "type": "git",
+    "hub_name": "iceberg_catalog"
   },
   "dwe_trino": {
     "url": "https://github.com/ponderdwe/dwe_trino",
-    "type": "git"
+    "type": "git",
+    "hub_name": "trino"
   },
   "dwe_dbt_kg": {
     "url": "https://github.com/ponderdwe/dwe_dbt_kg",
-    "type": "git"
+    "type": "git",
+    "hub_name": "dbt_kg"
   }
 }
