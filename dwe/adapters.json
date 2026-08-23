@@ -3,6 +3,14 @@
     "url": "https://github.com/ponderdwe/dwe_cube",
     "type": "git"
   },
+  "dwe_iceberg_catalog": {
+    "url": "https://github.com/ponderdwe/dwe_iceberg_catalog",
+    "type": "git"
+  },
+  "dwe_trino": {
+    "url": "https://github.com/ponderdwe/dwe_trino",
+    "type": "git"
+  },
   "dwe_dbt_kg": {
     "url": "https://github.com/ponderdwe/dwe_dbt_kg",
     "type": "git"
