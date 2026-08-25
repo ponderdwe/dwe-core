@@ -304,6 +304,90 @@ def hydrate_repo(
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def dehydrate_repo(
+    *,
+    git_repo: str,
+    branch: str,
+    token: str,
+    git_username: str = "",
+    git_provider: str = "github",
+    base_branch: str = "main",
+) -> dict:
+    """
+    Push a ``dehydrate/<branch>`` branch to the client repo, triggering the
+    destroy CI workflow that was written by ``hydrate_repo()``.
+
+    The destroy workflow runs ``pulumi destroy --yes`` for the matching
+    Pulumi workspace when it detects a push to the ``dehydrate/<branch>``
+    branch.
+
+    Parameters
+    ----------
+    git_repo : str
+        Client repository URL.
+    branch : str
+        Environment branch to destroy (e.g. "main", "develop").
+        The created branch will be named ``dehydrate/<branch>``.
+    token : str
+        Git provider token for clone + push.
+    git_username : str
+        Git username for HTTPS auth (GitLab).
+    git_provider : str
+        "github" or "gitlab".
+    base_branch : str
+        Branch to clone from when creating the dehydrate branch.
+
+    Returns
+    -------
+    dict
+        dehydrate_branch, repo_url, pushed (bool)
+    """
+    from dwe.git_ops import (
+        clone_repo,
+        commit_all,
+        create_and_checkout_branch,
+        parse_repo_info,
+        push_branch,
+    )
+
+    _, repo_name = parse_repo_info(git_repo)
+    authed_url = _inject_token(git_repo, token, git_provider, git_username)
+    dehydrate_branch = f"dehydrate/{branch}"
+
+    tmpdir = tempfile.mkdtemp(prefix=f"dwe-dehydrate-{repo_name}-")
+    try:
+        logger.info("Cloning %s for dehydration of branch '%s'", git_repo, branch)
+        repo, repo_path = clone_repo(authed_url, tmpdir)
+        repo.git.checkout(base_branch)
+
+        create_and_checkout_branch(repo, dehydrate_branch)
+
+        # Write a marker so commit_all has something to stage.
+        marker = Path(repo_path) / "pulumi" / ".dehydrate"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(
+            f"# Dehydrate marker — push this branch to destroy '{branch}' resources.\n"
+            f"# Branch: {dehydrate_branch}\n"
+            f"# Generated: {datetime.now().isoformat()}\n"
+        )
+
+        commit_all(repo, f"chore: dehydrate {branch} environment")
+        push_branch(repo, dehydrate_branch)
+        logger.info("Pushed dehydrate branch '%s' to %s", dehydrate_branch, git_repo)
+
+        return {
+            "dehydrate_branch": dehydrate_branch,
+            "pushed": True,
+            "repo_url": git_repo,
+        }
+
+    except Exception as exc:
+        logger.error("Dehydration failed: %s", exc, exc_info=True)
+        raise HydrationError(str(exc)) from exc
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Internal helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -445,21 +529,26 @@ def _generate_ci_workflows(
     if platform == "github":
         workflows_dir = Path(repo_path) / ".github" / "workflows"
         workflows_dir.mkdir(parents=True, exist_ok=True)
+        destroy_template_file = f"{platform}-destroy.yaml"
+        destroy_template = (
+            jinja_env.get_template(destroy_template_file)
+            if (ci_dir / destroy_template_file).exists()
+            else None
+        )
         for mapping in workspace_mappings:
             env_name = mapping["branch"]
             workspace = mapping.get("workspace", env_name)
             secret_name = mapping.get("secret_name", f"DWE_DEPLOY_{env_name.upper()}")
             env_extra = {k.upper(): v for k, v in mapping.get("env_config", {}).items()}
-            rendered = template.render(
-                ENV_NAME=env_name,
-                WORKSPACE_NAME=workspace,
-                SECRET_NAME=secret_name,
-                PROJECT_NAME=project_name,
-                **{**ci_extra, **env_extra},
-            )
+            ctx = dict(ENV_NAME=env_name, WORKSPACE_NAME=workspace, SECRET_NAME=secret_name, PROJECT_NAME=project_name, **{**ci_extra, **env_extra})
+            rendered = template.render(**ctx)
             out = workflows_dir / f"deploy-{env_name}.yaml"
             out.write_text(rendered)
             logger.info("CI/CD generated: %s", out.relative_to(repo_path))
+            if destroy_template:
+                destroy_out = workflows_dir / f"destroy-{env_name}.yaml"
+                destroy_out.write_text(destroy_template.render(**ctx))
+                logger.info("Destroy workflow generated: %s", destroy_out.relative_to(repo_path))
     else:
         # GitLab: single .gitlab-ci.yml at repo root with all environments
         sections = []
