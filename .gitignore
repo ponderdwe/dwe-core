@@ -2,5 +2,7 @@ dwe/__pycache__
 tests/__pycache__
 local_development
 .agents/
-.claude/skills/
+.claude/skills/*
+!.claude/skills/dwe-adapter/
+!.claude/skills/update-adapter-template/
 skills-lock.json
