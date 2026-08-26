@@ -13,5 +13,25 @@
     "url": "https://github.com/ponderdwe/dwe_dbt_kg",
     "type": "git",
     "name": "dbt_kg"
+  },
+  "dwe_superset": {
+    "url": "https://github.com/ponderdwe/dwe_superset",
+    "type": "git",
+    "name": "superset"
+  },
+  "dwe_coder": {
+    "url": "https://github.com/ponderdwe/dwe_coder",
+    "type": "git",
+    "name": "coder"
+  },
+  "dwe_litellm": {
+    "url": "https://github.com/ponderdwe/dwe_litellm",
+    "type": "git",
+    "name": "litellm"
+  },
+  "dwe_airflow": {
+    "url": "https://github.com/ponderdwe/dwe_airflow",
+    "type": "git",
+    "name": "airflow"
   }
 }
