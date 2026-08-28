@@ -5,3 +5,7 @@ When working in any dwe adapter repo or discussing adapter architecture, load th
 # update-adapter-template
 - **update-adapter-template** (`.claude/skills/update-adapter-template/SKILL.md`) - run after any structural change to a DWE adapter repo to keep the dwe-adapter skill documentation accurate. Trigger: `/update-adapter-template`
 When the user types `/update-adapter-template`, use this skill before doing anything else.
+
+# dwe-local-adapter-test
+- **dwe-local-adapter-test** (`.claude/skills/dwe-local-adapter-test/SKILL.md`) - hydrate and run a DWE adapter locally for testing without dwe-core or CI. Trigger: `/dwe-local-adapter-test`
+When the user types `/dwe-local-adapter-test`, use this skill before doing anything else.
