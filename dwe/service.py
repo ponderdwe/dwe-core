@@ -461,9 +461,8 @@ def _patch_pulumi_stack_configs(
         config = data.setdefault("config", {})
         for key, val in env_config.items():
             config_key = f"{project_name}:{key}"
-            if config_key in config:
-                config[config_key] = val
-                logger.info("Patched %s in %s", config_key, stack_file.name)
+            config[config_key] = val
+            logger.info("Patched %s in %s", config_key, stack_file.name)
         stack_file.write_text(yaml.safe_dump(data, default_flow_style=False, sort_keys=False))
 
 
