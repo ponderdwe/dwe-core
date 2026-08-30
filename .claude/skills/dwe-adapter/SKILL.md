@@ -268,7 +268,7 @@ Adapters receive `DB_HOST` + `DB_PASS` pointing at an **existing** PostgreSQL cl
 import pulumi_azure_native.dbforpostgresql.v20221201 as pg
 
 db_host = secrets["DB_HOST"]
-db_name = f"{adapter}_{env}" if env != "prod" else adapter  # e.g. "superset_dev" / "superset"
+db_name = f"{adapter}_{env}"  # e.g. "superset_prod", "superset_dev" — always include env suffix
 
 pg.Database(
     f"{project_name}-pg-db{suffix}",
@@ -382,9 +382,30 @@ pulumi config set {@ PROJECT_NAME @}:key_vault_name ${{ secrets.KEY_VAULT_NAME }
 pulumi config set {@ PROJECT_NAME @}:resource_group ${{ secrets.RESOURCE_GROUP }} --stack ${{ env.WORKSPACE }}
 pulumi config set {@ PROJECT_NAME @}:subscription_id ${{ secrets.AZURE_SUBSCRIPTION_ID }} --stack ${{ env.WORKSPACE }}
 pulumi config set {@ PROJECT_NAME @}:cloud_provider {@ CLOUD_PROVIDER @} --stack ${{ env.WORKSPACE }}
+# Per-env adapter settings — rendered from env_config passed by dwe-hub:
+{% if INSTANCE_TYPE %}
+pulumi config set {@ PROJECT_NAME @}:instance_type "{@ INSTANCE_TYPE @}" --stack ${{ env.WORKSPACE }}
+{% endif %}
+{% if VOLUME_SIZE %}
+pulumi config set {@ PROJECT_NAME @}:volume_size "{@ VOLUME_SIZE @}" --stack ${{ env.WORKSPACE }}
+{% endif %}
+{% if REDIS_MODE %}
+pulumi config set {@ PROJECT_NAME @}:redis_mode "{@ REDIS_MODE @}" --stack ${{ env.WORKSPACE }}
+{% endif %}
 ```
 
 `cloud_provider` must be set in Pulumi config so `__main__.py` can fall back to it when `dwe-hydration.yaml` is absent. `project_name` is NOT set — `pulumi.get_project()` handles it automatically.
+
+**Per-env values** (`x_dwe_per_env: true` in copier.yml) are passed to the CI template via `env_extra` (uppercased keys from `WorkspaceMapping.extra_config`). The CI template must include conditional `pulumi config set` commands for each such value — if missing, `_azure.py`/`_aws.py` falls back to hardcoded defaults silently.
+
+**Full data flow for per-env values**:
+1. User fills in value in dwe-hub UI → dwe-hub API saves to `WorkspaceMapping.extra_config` (JSON)
+2. `hydrate_repo()` reads `m.get_extra_config()` → passes as `env_config` in workspace_mappings
+3. `_generate_ci_workflows()` reads `env_config` → uppercases keys → renders CI template variables (e.g. `INSTANCE_TYPE`)
+4. CI template sets `pulumi config set project:instance_type ...`
+5. `_azure.py` reads via `config.get("instance_type")`
+
+If any step is broken (API not saving, template missing the `pulumi config set` line), the value silently falls back to the hardcoded default in `_azure.py`/`_aws.py`.
 
 ---
 
@@ -428,3 +449,7 @@ Use `dwe_trino` as the starting point. Keep `_startup.py`, `config_generator.py`
 - **Run Command extension blocking reimage**: delete via `az rest --method delete --url ".../extensions/RunCommandHandlerLinux?api-version=2024-03-01"`.
 - **Stale Pulumi lock**: delete the `.json` blob in the Pulumi state container (Azure Blob / S3).
 - **App Gateway request timeout**: default is 20s — increase for slow-starting apps (e.g., LiteLLM needs 600s for Bedrock streaming).
+- **`instance_type` ignored → wrong VM size (quota error for wrong family)**: The CI template is missing `pulumi config set project:instance_type` — Pulumi falls back to the hardcoded default (e.g. `Standard_D4s_v3`). Fix: add conditional `{% if INSTANCE_TYPE %}pulumi config set ...:instance_type ...{% endif %}` to both preview and apply steps in `ci-templates/github.yaml`. Same pattern applies to `volume_size`, `redis_mode`, `redis_sku`.
+- **Per-env values not saved by dwe-hub** (dwe-hub bug, fixed 2026-08-28): `create_deploy_config` API endpoint was not reading `env_config` from workspace mapping data and not calling `m.set_extra_config()`. Symptom: workspace mapping `extra_config` is always NULL, per-env CI template variables are always empty, values silently fall back to hardcoded defaults.
+- **`_patch_pulumi_stack_configs` silently skips unknown keys** (dwe-core bug, fixed 2026-08-28): the function had `if config_key in config: config[config_key] = val` — only updated keys already present in the rendered Pulumi stack YAML. Fixed to always upsert. Symptom: re-hydrating a repo doesn't update instance_type/volume_size even though dwe-hub sends them.
+- **Local Redis in docker-compose — don't use Jinja**: use a plain override file `docker-compose.local-redis.yml` that adds the redis service and `depends_on: [redis]` to all app services. In the startup script, select compose files conditionally in Python before building the script: `_compose_files = "-f docker-compose.yml -f docker-compose.local-redis.yml" if redis_mode == "local" else "-f docker-compose.yml"`. Docker containers communicate via service name (`redis`), not `127.0.0.1`.
