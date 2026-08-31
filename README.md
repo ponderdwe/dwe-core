@@ -50,12 +50,11 @@ dwe list-adapters
 ```
 dwe create-service <adapter_name> \
   --git-repo <url> \
-  [--envs <name>]...       \   # default: development, main
+  [--envs <name>]...       \   # repeat for multiple environments; default: development, main
   [--secrets <json>]       \   # e.g. '{"AWS_KEY":"abc"}'
   [--tag <version>]        \   # adapter git tag, e.g. v1.2.0
   [--token <api-token>]    \   # or set GITHUB_TOKEN / GITLAB_TOKEN
-  [--aws-region <region>]  \
-  [--instance-type <type>] \
+  [--set key=value]...     \   # override copier questions (run `dwe adapter-questions` to see keys)
   [--clone-dir <path>]         # default: temp dir
 ```
 
@@ -64,36 +63,30 @@ dwe create-service <adapter_name> \
 ```bash
 export GITHUB_TOKEN=ghp_xxxx
 
-dwe create-service test_adapter \
-  --git-repo https://github.com/acme/data-platform \
-  --envs development \
-  --envs staging \
-  --envs main \
-  --secrets '{"PULUMI_ACCESS_TOKEN":"pul-xxx","AWS_ACCESS_KEY_ID":"AKI...","AWS_SECRET_ACCESS_KEY":"..."}' \
+dwe create-service dwe_cube \
+  --git-repo https://github.com/acme/cube-deploy \
+  --envs dev \
+  --envs prod \
+  --secrets '{"AZURE_CLIENT_ID":"...","AZURE_CLIENT_SECRET":"...","PULUMI_AZURE_STATE":"azblob://deploy-state/cube-state"}' \
   --tag v1.0.0 \
-  --aws-region eu-west-1 \
-  --instance-type t3.small
+  --set git_repo_url=https://github.com/acme/cube-deploy \
+  --set cloud_provider=azure
 ```
 
-After this runs, the `data-platform` repo has:
+After this runs, the `cube-deploy` repo has:
 
 ```
 .github/workflows/
-  deploy-development.yaml
-  deploy-staging.yaml
-  deploy-main.yaml
-blueprint/
-  html/index.html
-  instance-setup.sh
+  deploy-dev.yaml
+  deploy-prod.yaml
 docker-compose.yml
-docker-compose.prod.yml
 .env.example
 justfile
-infrastructure/
-  __main__.py          <- project_name, instance_type already substituted
+pulumi/
+  __main__.py          <- project_name already substituted
   Pulumi.yaml
   requirements.txt
-dwe-state.json
+dwe-hydration.yaml
 .copier-answers.yml    <- Copier's internal state (enables future updates)
 ```
 
@@ -171,6 +164,67 @@ docker compose up
 
 **AWS credentials** — the command uses `boto3` and picks up credentials the standard way: environment variables (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`), `~/.aws/credentials`, an IAM role, etc.
 
+### `dwe adapter-questions`
+
+```bash
+dwe adapter-questions <adapter_name>
+```
+
+Lists the copier questions an adapter accepts. Use these as `--set key=value` overrides in `create-service`.
+
+### `dwe show-properties`
+
+```bash
+dwe show-properties <adapter_name>
+```
+
+Shows supported cloud providers, git providers, services, and CI templates for an adapter.
+
+### `dwe show-services`
+
+```bash
+dwe show-services <adapter_name>
+```
+
+Lists the Docker services bundled in an adapter.
+
+### `dwe show-secrets-template`
+
+```bash
+dwe show-secrets-template <adapter_name> [--cloud aws|azure] [--git-provider github|gitlab]
+```
+
+Prints a JSON template of all secrets the adapter requires. Fill it in and upload with `set-secrets`.
+
+### `dwe set-secrets`
+
+```bash
+dwe set-secrets \
+  --git-repo <url> \
+  [--secrets <json>]        \   # inline JSON
+  [--secrets-file <path>]   \   # or a JSON file
+  [--adapter <name>]        \   # validate required keys before pushing
+  [--token <api-token>]         # or GITHUB_TOKEN / GITLAB_TOKEN
+```
+
+Creates or updates GitHub Actions secrets / GitLab CI variables in a repository.
+
+### `dwe list-secrets`
+
+```bash
+dwe list-secrets --git-repo <url> [--adapter <name>] [--token <api-token>]
+```
+
+Lists secret key names in a repository. Values are never revealed. Pass `--adapter` to cross-reference against what the adapter requires.
+
+### `dwe delete-secret`
+
+```bash
+dwe delete-secret --git-repo <url> --key <KEY> [--token <api-token>]
+```
+
+Deletes a single secret / CI variable from a repository.
+
 ### `dwe list-adapters`
 
 ```bash
@@ -235,19 +289,22 @@ my_adapter/
 ├── .env.example                # Template for secrets — committed; .env is git-ignored
 ├── .gitignore
 │
-├── justfile                    # Dev commands (just up, just deploy-prod, just infra-up)
+├── justfile                    # Dev commands (just up, just logs, etc.)
 │
 ├── blueprint/                  # Application-level config files
-│   ├── html/                   # or nginx.conf, superset_config.py, etc.
-│   └── instance-setup.sh       # EC2 user-data bootstrap script
+│   └── instance-setup.sh       # VM user-data bootstrap script
 │
-├── infrastructure/             # Pulumi IaC — only files here use .jinja
-│   ├── __main__.py.jinja       # <- .jinja because it embeds {{ project_name }}
+├── pulumi/                     # Pulumi IaC — only .jinja files are templated
+│   ├── __main__.py             # Entry point (imports _aws.py / _azure.py)
+│   ├── _aws.py                 # AWS-specific resources (ASG, ALB, Route53…)
+│   ├── _azure.py               # Azure-specific resources (VMSS, AppGW, NLB…)
 │   ├── Pulumi.yaml.jinja       # <- .jinja because it embeds {{ project_name }}
-│   └── requirements.txt
+│   ├── dwe-hydration.yaml.jinja
+│   └── requirements.txt.jinja
 │
 └── ci-templates/               # Jinja2 templates rendered by the CLI (not Copier)
-    └── deploy.yaml             # Uses {{ ENV_NAME }}, {{ AWS_REGION }}
+    ├── github.yaml             # GitHub Actions — two-path deploy
+    └── gitlab.yaml             # GitLab CI — two-path deploy
 ```
 
 ### Step 4: Write `copier.yml`
@@ -301,31 +358,26 @@ Apply this rule: **if the value changes per client, use `{{ variable }}`. If it 
 | File | Approach | Reason |
 |---|---|---|
 | `docker-compose.yml` | `.env` interpolation (`${VAR:-default}`) | Works locally without any substitution; runtime config |
-| `infrastructure/__main__.py` | Jinja2 (`.jinja` extension) | Cloud resource names must be unique per client at provision time |
-| `infrastructure/Pulumi.yaml` | Jinja2 (`.jinja` extension) | Stack name must be unique per client |
+| `pulumi/Pulumi.yaml` | Jinja2 (`.jinja` extension) | Stack name must be unique per client |
+| `pulumi/dwe-hydration.yaml` | Jinja2 (`.jinja` extension) | Adapter metadata stamped per client |
+| `pulumi/requirements.txt` | Jinja2 (`.jinja` extension) | Pin adapter version at hydration time |
 | `justfile` | Verbatim copy (no `.jinja`) | Commands are identical across clients |
 | `blueprint/instance-setup.sh` | Verbatim copy | Generic bootstrap, no client-specific values |
 | `.env.example` | Verbatim copy | Users fill in real values after cloning |
 
 **Jinja2 syntax in `.jinja` files:**
 
-```python
-# infrastructure/__main__.py.jinja
-instance = aws.ec2.Instance(
-    "{{ project_name }}-instance",          # <- substituted by Copier
-    instance_type="{{ instance_type }}",
-    ...
-)
+```yaml
+# pulumi/Pulumi.yaml.jinja
+name: {{ project_name }}    # <- substituted by Copier
+runtime: python
 ```
 
 After `dwe create-service` this becomes:
 
-```python
-instance = aws.ec2.Instance(
-    "acme-data-platform-instance",
-    instance_type="t3.small",
-    ...
-)
+```yaml
+name: acme-cube-deploy
+runtime: python
 ```
 
 ### Step 6: Write `ci-templates/deploy.yaml`
@@ -356,7 +408,16 @@ jobs:
           AWS_REGION: {@ AWS_REGION @}                           # substituted by dwe CLI
 ```
 
-Available variables: `{@ ENV_NAME @}`, `{@ AWS_REGION @}`.
+Available variables:
+
+| Variable | Description |
+|---|---|
+| `{@ ENV_NAME @}` | Environment branch name (e.g. `dev`, `prod`) |
+| `{@ WORKSPACE_NAME @}` | Pulumi stack / workspace name |
+| `{@ SECRET_NAME @}` | Secret Manager secret name (Key Vault / Secrets Manager) |
+| `{@ PROJECT_NAME @}` | Pulumi project name (used for config key prefix) |
+| `{@ CLOUD_PROVIDER @}` | `aws` or `azure` |
+| `{@ AWS_REGION @}` | AWS region (AWS only) |
 
 ### Step 7: Register the adapter
 
@@ -537,16 +598,16 @@ Push to branch
   Detect changes
   (dorny/paths-filter)
        │
-       ├─── infrastructure/** changed?
+       ├─── pulumi/** changed?
        │         │
        │         ├─ Pull Request → pulumi preview  (validate, no apply)
        │         └─ Push        → pulumi up --yes  (apply infra changes)
        │
        └─── docker-compose / blueprint changed?
-                 AND infrastructure NOT changed?
+                 AND pulumi NOT changed?
                          │
-                         └─ Push → SSM: git pull + just deploy-prod
-                                   (redeploy app on the live EC2 instance)
+                         └─ Push → instance refresh (ASG) or VMSS update-instances
+                                   (VMs reboot from base image, no Pulumi run)
 ```
 
 **Why skip deploy when infra also changed?** The `pulumi up` step re-provisions the EC2 instance itself, which already pulls the latest code via its user-data script. Running the app deploy on top of that would be redundant and potentially racy.
@@ -555,88 +616,64 @@ Push to branch
 
 | Job | Trigger | What it does |
 |---|---|---|
-| `pulumi-preview` | PR, `infrastructure/**` changed | Runs `pulumi preview` — shows what *would* change, no side effects |
-| `pulumi-apply` | Push, `infrastructure/**` changed | Runs `pulumi up --yes` — applies infra changes |
-| `deploy-app` | Push, app files changed, infra NOT changed | AWS SSM command: `git pull && just deploy-prod` on live EC2 |
+| `pulumi-preview` | PR, `pulumi/**` changed | Runs `pulumi preview` — shows what *would* change, no side effects |
+| `pulumi-apply` | Push, `pulumi/**` changed | Runs `pulumi up --yes` + triggers instance refresh / VMSS update |
+| `deploy-app` | Push, app files changed, `pulumi/**` NOT changed | Triggers instance refresh (ASG) or VMSS update-instances (Azure) — skips Pulumi entirely |
 
 ### Required Secrets
 
-Set these via `dwe create-service --secrets '{...}'` or manually in GitHub repository settings:
+Set these via `dwe set-secrets` or manually in GitHub / GitLab repository settings. Use `dwe show-secrets-template <adapter>` to get the full list for a specific adapter.
+
+**AWS:**
 
 | Secret | Description |
 |---|---|
-| `AWS_ACCESS_KEY_ID` | AWS credentials for Pulumi and SSM |
+| `AWS_ACCESS_KEY_ID` | AWS credentials for Pulumi + ASG |
 | `AWS_SECRET_ACCESS_KEY` | AWS credentials |
-| `PULUMI_ACCESS_TOKEN` | Pulumi Cloud token |
-| `PULUMI_CONFIG_PASSPHRASE` | Pulumi stack encryption passphrase |
-| `PULUMI_STACK` | Pulumi stack reference, e.g. `myorg/myproject/development` |
-| `EC2_INSTANCE_ID` | Instance ID from `pulumi stack output instance_id`, e.g. `i-0abc1234` |
+| `PULUMI_S3_STATE` | S3 backend URL, e.g. `s3://my-pulumi-state-bucket` |
 
-### SSM Prerequisites
+**Azure:**
 
-The `deploy-app` job uses **AWS Systems Manager (SSM)** instead of SSH — no port 22, no SSH key stored as a secret.
-
-To enable SSM on the EC2 instance:
-
-**1. IAM instance profile** — attach a role with these policies to the EC2:
-```json
-{
-  "Effect": "Allow",
-  "Action": [
-    "ssm:UpdateInstanceInformation",
-    "ssmmessages:CreateControlChannel",
-    "ssmmessages:OpenControlChannel",
-    "ec2messages:GetMessages",
-    "ec2messages:SendReply"
-  ],
-  "Resource": "*"
-}
-```
-
-Or simply attach the AWS managed policy `AmazonSSMManagedInstanceCore`.
-
-**2. SSM agent** — Amazon Linux 2023 ships with it pre-installed. The `blueprint/instance-setup.sh` bootstrap script ensures it's running:
-```bash
-systemctl enable amazon-ssm-agent
-systemctl start amazon-ssm-agent
-```
-
-**3. Store the instance ID** — after running `just infra-up`, get the instance ID and store it as a secret:
-```bash
-cd infrastructure && pulumi stack output instance_id
-# → i-0abc1234567890def
-# Add this to GitHub repository secrets as EC2_INSTANCE_ID
-```
+| Secret | Description |
+|---|---|
+| `AZURE_CLIENT_ID` | Service principal client ID |
+| `AZURE_CLIENT_SECRET` | Service principal secret |
+| `AZURE_TENANT_ID` | Azure AD tenant ID |
+| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID |
+| `AZURE_STORAGE_ACCOUNT` | Storage account name for Pulumi state backend |
+| `PULUMI_AZURE_STATE` | Azure Blob Storage URL, e.g. `azblob://container-name` |
+| `KEY_VAULT_NAME` | Key Vault containing adapter runtime secrets |
+| `RESOURCE_GROUP` | Resource group containing the VMSS |
 
 ### Example: What Happens on a Typical Push
 
-**Scenario 1 — you edited `blueprint/html/index.html`:**
+**Scenario 1 — you edited `docker-compose.yml` or `blueprint/instance-setup.sh`:**
 
 ```
 Push to development branch
   ↓
-detect-changes: infrastructure=false, app=true
+detect-changes: pulumi=false, app=true
   ↓
 deploy-app runs:
-  aws ssm send-command "git pull && just deploy-prod"
-  polls every 10s until success
-  prints stdout from EC2 instance
+  AWS:   starts ASG instance refresh (rolling, waits for Successful)
+  Azure: az vmss update-instances --instance-ids '*' (waits for Succeeded)
   ↓
-New HTML is live ~30 seconds after push
+VMs reboot from base image, pick up latest code at startup
 ```
 
-**Scenario 2 — you changed `infrastructure/__main__.py.jinja` (e.g. bigger instance type):**
+**Scenario 2 — you changed `pulumi/_azure.py` (e.g. bigger VM SKU):**
 
 ```
 Push to development branch
   ↓
-detect-changes: infrastructure=true, app=false
+detect-changes: pulumi=true, app=false
   ↓
 pulumi-apply runs:
   pulumi up --yes
-  Pulumi modifies the EC2 instance type in-place (or replaces it)
+  Azure auto-applies VMSS model change (Automatic upgrade policy)
+  az vmss update-instances triggered for belt-and-suspenders
   ↓
-Infrastructure updated. New instance pulls latest code via user-data.
+Infrastructure updated. New instance picks up latest code at boot.
 ```
 
 **Scenario 3 — you opened a PR with Pulumi changes:**
@@ -655,22 +692,7 @@ Reviewer can see exactly what Pulumi will do before merging.
 
 ### Adapting for Other Platforms
 
-The same two-path logic works for GitLab CI. The superset's `.gitlab-ci.yml` uses:
-
-```yaml
-# Skip deploy if terraform changed
-- if: $CI_COMMIT_BRANCH == "main"
-  changes:
-    - terraform_scalling/**/*
-  when: never
-# Only deploy if docker/compose changed
-- if: $CI_COMMIT_BRANCH == "main"
-  changes:
-    - docker/**/*
-    - docker-compose.yml
-```
-
-For your adapter's GitLab template, mirror this pattern with `pulumi` instead of `terraform` and `infrastructure/**` instead of `terraform_scalling/**`.
+The same two-path logic works for GitLab CI. The adapter's `ci-templates/gitlab.yaml` mirrors `github.yaml` exactly — same `pulumi/**` path filter, same three jobs (`pulumi-preview`, `pulumi-apply`, `deploy-app`), same cloud-provider branching with `{% if CLOUD_PROVIDER == "azure" %}`.
 
 ---
 
