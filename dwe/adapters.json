@@ -1,4 +1,9 @@
 {
+  "dwe_nessie": {
+    "url": "https://github.com/ponderdwe/dwe_nessie",
+    "type": "git",
+    "name": "nessie"
+  },
   "dwe_cube": {
     "url": "https://github.com/ponderdwe/dwe_cube",
     "type": "git",
