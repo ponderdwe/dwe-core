@@ -38,5 +38,10 @@
     "url": "https://github.com/ponderdwe/dwe_airflow",
     "type": "git",
     "name": "airflow"
+  },
+  "dwe_portal": {
+    "url": "https://github.com/ponderdwe/dwe_portal",
+    "type": "git",
+    "name": "portal"
   }
 }
